@@ -8,7 +8,9 @@ mcp = FastMCP("slack")
 SLACK_API_BASE = "https://slack.com/api"
 
 
-async def make_request(url: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+async def make_request(
+    url: str, payload: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     xoxc_token = os.environ["SLACK_XOXC_TOKEN"]
     xoxd_token = os.environ["SLACK_XOXD_TOKEN"]
 
@@ -22,17 +24,13 @@ async def make_request(url: str, payload: dict[str, Any] | None = None) -> dict[
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                url, headers=headers, cookies=cookies, data=payload, timeout=30.0
+                url, headers=headers, cookies=cookies, json=payload, timeout=30.0
             )
             response.raise_for_status()
             return response.json()
         except Exception as e:
             print(e)
             return None
-
-
-def format_channels_response(data: dict[str, Any]) -> str:
-    return f"Channels: {data.get('items', [])}"
 
 
 @mcp.tool()
@@ -42,7 +40,7 @@ async def list_channels() -> str:
     data = await make_request(url)
     print(data)
     if data and data.get("ok"):
-        return format_channels_response({"items": data.get("channels", [])})
+        return data.get("channels", [])
 
 
 @mcp.tool()
@@ -53,7 +51,8 @@ async def get_channel_history(channel_id: str) -> str:
     data = await make_request(url, payload=payload)
     print(data)
     if data and data.get("ok"):
-        return format_channels_response({"items": data.get("messages", [])})
+        return data.get("messages", [])
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
