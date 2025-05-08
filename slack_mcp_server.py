@@ -54,5 +54,25 @@ async def get_channel_history(channel_id: str) -> str:
         return data.get("messages", [])
 
 
+@mcp.tool()
+async def post_message(channel_id: str, message: str) -> str:
+    """Post a message to a channel."""
+    url = f"{SLACK_API_BASE}/chat.postMessage"
+    payload = {"channel": channel_id, "text": message}
+    data = await make_request(url, payload=payload)
+    print(data)
+    return data.get("ok")
+
+
+@mcp.tool()
+async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
+    """Add a reaction to a message."""
+    url = f"{SLACK_API_BASE}/reactions.add"
+    payload = {"channel": channel_id, "name": reaction, "timestamp": message_ts}
+    data = await make_request(url, payload=payload)
+    print(data)
+    return data.get("ok")
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
