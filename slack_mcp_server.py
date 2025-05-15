@@ -55,10 +55,12 @@ async def get_channel_history(channel_id: str) -> str:
 
 
 @mcp.tool()
-async def post_message(channel_id: str, message: str) -> str:
+async def post_message(channel_id: str, message: str, thread_ts: str = "") -> str:
     """Post a message to a channel."""
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
     data = await make_request(url, payload=payload)
     print(data)
     return data.get("ok")
