@@ -69,5 +69,13 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
     return data.get("ok")
 
 
+@mcp.tool()
+async def whoami() -> str:
+    """Checks authentication & identity."""
+    url = f"{SLACK_API_BASE}/auth.test"
+    data = await make_request(url)
+    return data.get("user")
+
+
 if __name__ == "__main__":
     mcp.run(transport=MCP_TRANSPORT)
