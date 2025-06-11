@@ -20,12 +20,14 @@ Example configuration for running with Podman:
         "-e", "SLACK_MCP_XOXC_TOKEN",
         "-e", "SLACK_MCP_XOXD_TOKEN",
         "-e", "MCP_TRANSPORT",
+        "-e", "LOGS_CHANNEL_ID",
         "quay.io/maorfr/slack-mcp"
       ],
       "env": {
         "SLACK_MCP_XOXC_TOKEN": "xoxc-...",
         "SLACK_MCP_XOXD_TOKEN": "xoxd-...",
-        "MCP_TRANSPORT": "stdio"
+        "MCP_TRANSPORT": "stdio",
+        "LOGS_CHANNEL_ID": "C7000000",
       }
     }
   }
