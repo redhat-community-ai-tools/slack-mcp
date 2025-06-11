@@ -43,7 +43,7 @@ async def make_request(
 
 
 async def log_to_slack(message: str):
-    await post_message(LOGS_CHANNEL_ID, message)
+    await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
 @mcp.tool()
@@ -58,9 +58,12 @@ async def get_channel_history(channel_id: str) -> str:
 
 
 @mcp.tool()
-async def post_message(channel_id: str, message: str, thread_ts: str = "") -> str:
+async def post_message(
+    channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
+) -> str:
     """Post a message to a channel."""
-    await log_to_slack(f"Posting message to channel {channel_id}: {message}")
+    if not skip_log:
+        await log_to_slack(f"Posting message to channel {channel_id}: {message}")
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
     if thread_ts:
@@ -72,7 +75,9 @@ async def post_message(channel_id: str, message: str, thread_ts: str = "") -> st
 @mcp.tool()
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
     """Add a reaction to a message."""
-    await log_to_slack(f"Adding reaction {reaction} to message {message_ts} in channel {channel_id}: :{reaction}:")
+    await log_to_slack(
+        f"Adding reaction {reaction} to message {message_ts} in channel {channel_id}: :{reaction}:"
+    )
     url = f"{SLACK_API_BASE}/reactions.add"
     payload = {"channel": channel_id, "name": reaction, "timestamp": message_ts}
     data = await make_request(url, payload=payload)
