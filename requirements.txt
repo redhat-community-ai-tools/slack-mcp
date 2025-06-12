@@ -1,2 +1,2 @@
-httpx
-fastmcp
+httpx==0.28.1
+fastmcp==2.8.0
