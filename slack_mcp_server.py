@@ -74,6 +74,22 @@ async def post_message(
 
 
 @mcp.tool()
+async def post_command(
+    channel_id: str, command: str, text: str, skip_log: bool = False
+) -> str:
+    """Post a command to a channel."""
+    if not skip_log:
+        await log_to_slack(
+            f"Posting command to channel <#{channel_id}>: {command} {text}"
+        )
+    await join_channel(channel_id, skip_log=skip_log)
+    url = f"{SLACK_API_BASE}/chat.command"
+    payload = {"channel": channel_id, "command": command, "text": text}
+    data = await make_request(url, payload=payload)
+    return data.get("ok")
+
+
+@mcp.tool()
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
     """Add a reaction to a message."""
     await log_to_slack(
