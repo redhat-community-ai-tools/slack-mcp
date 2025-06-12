@@ -49,7 +49,7 @@ async def log_to_slack(message: str):
 @mcp.tool()
 async def get_channel_history(channel_id: str) -> str:
     """Get the history of a channel."""
-    await log_to_slack(f"Getting history of channel {channel_id}")
+    await log_to_slack(f"Getting history of channel <#{channel_id}>")
     url = f"{SLACK_API_BASE}/conversations.history"
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
@@ -63,7 +63,8 @@ async def post_message(
 ) -> str:
     """Post a message to a channel."""
     if not skip_log:
-        await log_to_slack(f"Posting message to channel {channel_id}: {message}")
+        await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
+    await join_channel(channel_id, skip_log=skip_log)
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
     if thread_ts:
@@ -76,7 +77,7 @@ async def post_message(
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
     """Add a reaction to a message."""
     await log_to_slack(
-        f"Adding reaction {reaction} to message {message_ts} in channel {channel_id}: :{reaction}:"
+        f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
     url = f"{SLACK_API_BASE}/reactions.add"
     payload = {"channel": channel_id, "name": reaction, "timestamp": message_ts}
@@ -91,6 +92,17 @@ async def whoami() -> str:
     url = f"{SLACK_API_BASE}/auth.test"
     data = await make_request(url)
     return data.get("user")
+
+
+@mcp.tool()
+async def join_channel(channel_id: str, skip_log: bool = False) -> str:
+    """Join a channel."""
+    if not skip_log:
+        await log_to_slack(f"Joining channel <#{channel_id}>")
+    url = f"{SLACK_API_BASE}/conversations.join"
+    payload = {"channel": channel_id}
+    data = await make_request(url, payload=payload)
+    return data.get("ok")
 
 
 if __name__ == "__main__":
