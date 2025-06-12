@@ -14,6 +14,10 @@ parameters:
     value: "0.0.0.0"
   - name: LOGS_CHANNEL_ID
     value: C0700000000
+  - name: CERT_MANAGER_ISSUER_NAME
+    value: letsencrypt-dns
+  - name: MCP_HOST
+    value: slack-mcp.example.com
 objects:
 - apiVersion: apps/v1
   kind: Deployment
@@ -84,10 +88,14 @@ objects:
 - apiVersion: route.openshift.io/v1
   kind: Route
   metadata:
+    annotations:
+      cert-manager.io/issuer-kind: ClusterIssuer
+      cert-manager.io/issuer-name: ${CERT_MANAGER_ISSUER_NAME}
     name: slack-mcp
     labels:
       app: slack-mcp
   spec:
+    host: ${MCP_HOST}
     to:
       kind: Service
       name: slack-mcp
