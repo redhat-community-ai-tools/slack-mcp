@@ -17,15 +17,15 @@ Example configuration for running with Podman:
         "run",
         "-i",
         "--rm",
-        "-e", "SLACK_MCP_XOXC_TOKEN",
-        "-e", "SLACK_MCP_XOXD_TOKEN",
+        "-e", "SLACK_XOXC_TOKEN",
+        "-e", "SLACK_XOXD_TOKEN",
         "-e", "MCP_TRANSPORT",
         "-e", "LOGS_CHANNEL_ID",
         "quay.io/redhat-ai-tools/slack-mcp"
       ],
       "env": {
-        "SLACK_MCP_XOXC_TOKEN": "xoxc-...",
-        "SLACK_MCP_XOXD_TOKEN": "xoxd-...",
+        "SLACK_XOXC_TOKEN": "xoxc-...",
+        "SLACK_XOXD_TOKEN": "xoxd-...",
         "MCP_TRANSPORT": "stdio",
         "LOGS_CHANNEL_ID": "C7000000",
       }
