@@ -2,6 +2,7 @@ import os
 from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
+import re
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -46,6 +47,17 @@ async def log_to_slack(message: str):
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
+# Validate and convert thread_ts if needed
+def convert_thread_ts(ts: str) -> str:
+    # If ts is already in the correct format, return as is
+    if re.match(r"^\d+\.\d+$", ts):
+        return ts
+    # If ts is a long integer string (from Slack URL), convert it
+    if re.match(r"^\d{16}$", ts):
+        return f"{ts[:10]}.{ts[10:]}"
+    return ""
+
+
 @mcp.tool()
 async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
     """Get the history of a channel."""
@@ -68,7 +80,7 @@ async def post_message(
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
     if thread_ts:
-        payload["thread_ts"] = thread_ts
+        payload["thread_ts"] = convert_thread_ts(thread_ts)
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
@@ -96,7 +108,7 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
     url = f"{SLACK_API_BASE}/reactions.add"
-    payload = {"channel": channel_id, "name": reaction, "timestamp": message_ts}
+    payload = {"channel": channel_id, "name": reaction, "timestamp": convert_thread_ts(message_ts)}
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
