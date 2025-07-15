@@ -47,7 +47,7 @@ async def log_to_slack(message: str):
 
 
 @mcp.tool()
-async def get_channel_history(channel_id: str) -> str:
+async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
     """Get the history of a channel."""
     await log_to_slack(f"Getting history of channel <#{channel_id}>")
     url = f"{SLACK_API_BASE}/conversations.history"
@@ -60,7 +60,7 @@ async def get_channel_history(channel_id: str) -> str:
 @mcp.tool()
 async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
-) -> str:
+) -> bool:
     """Post a message to a channel."""
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
@@ -76,7 +76,7 @@ async def post_message(
 @mcp.tool()
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
-) -> str:
+) -> bool:
     """Post a command to a channel."""
     if not skip_log:
         await log_to_slack(
@@ -90,7 +90,7 @@ async def post_command(
 
 
 @mcp.tool()
-async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> str:
+async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     """Add a reaction to a message."""
     await log_to_slack(
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
@@ -111,7 +111,7 @@ async def whoami() -> str:
 
 
 @mcp.tool()
-async def join_channel(channel_id: str, skip_log: bool = False) -> str:
+async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
     if not skip_log:
         await log_to_slack(f"Joining channel <#{channel_id}>")
