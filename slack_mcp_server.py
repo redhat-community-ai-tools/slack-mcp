@@ -19,14 +19,17 @@ async def make_request(
     if MCP_TRANSPORT == "stdio":
         xoxc_token = os.environ["SLACK_XOXC_TOKEN"]
         xoxd_token = os.environ["SLACK_XOXD_TOKEN"]
+        user_agent = "MCP-Server/1.0"
     else:
         request_headers = mcp.get_context().request_context.request.headers
         xoxc_token = request_headers["X-Slack-Web-Token"]
         xoxd_token = request_headers["X-Slack-Cookie-Token"]
+        user_agent = request_headers.get("User-Agent", "MCP-Server/1.0")
 
     headers = {
         "Authorization": f"Bearer {xoxc_token}",
         "Content-Type": "application/json",
+        "User-Agent": user_agent,
     }
 
     cookies = {"d": xoxd_token}
