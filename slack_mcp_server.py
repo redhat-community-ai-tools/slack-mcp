@@ -27,6 +27,7 @@ async def make_request(
     headers = {
         "Authorization": f"Bearer {xoxc_token}",
         "Content-Type": "application/json",
+        "User-Agent": request_headers.get("User-Agent", "MCP-Server/1.0"),
     }
 
     cookies = {"d": xoxd_token}
