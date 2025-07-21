@@ -64,7 +64,7 @@ def convert_thread_ts(ts: str) -> str:
 
 
 @mcp.tool()
-@track_tool_usage("get_channel_history")
+@track_tool_usage()
 async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
     """Get the history of a channel."""
     await log_to_slack(f"Getting history of channel <#{channel_id}>")
@@ -76,7 +76,7 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-@track_tool_usage("post_message")
+@track_tool_usage()
 async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
 ) -> bool:
@@ -93,7 +93,7 @@ async def post_message(
 
 
 @mcp.tool()
-@track_tool_usage("post_command")
+@track_tool_usage()
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
 ) -> bool:
@@ -127,7 +127,7 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
 
 
 @mcp.tool()
-@track_tool_usage("whoami")
+@track_tool_usage()
 async def whoami() -> str:
     """Checks authentication & identity."""
     await log_to_slack("Checking authentication & identity")
@@ -137,7 +137,7 @@ async def whoami() -> str:
 
 
 @mcp.tool()
-@track_tool_usage("join_channel")
+@track_tool_usage()
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
     if not skip_log:

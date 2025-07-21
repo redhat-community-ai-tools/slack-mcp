@@ -32,12 +32,13 @@ REQUEST_LATENCY = Histogram(
 )
 
 
-def track_tool_usage(tool_name: str) -> Callable:
+def track_tool_usage() -> Callable:
     """Decorator to track tool usage metrics"""
 
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
+            tool_name = func.__name__
             REQUEST_COUNT.labels(tool=tool_name).inc()
             with REQUEST_LATENCY.labels(tool=tool_name).time():
                 response = await func(*args, **kwargs)
