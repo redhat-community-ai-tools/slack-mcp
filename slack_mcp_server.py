@@ -3,6 +3,8 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 import re
+import uvicorn
+from metrics import metrics
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -111,7 +113,11 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
     url = f"{SLACK_API_BASE}/reactions.add"
-    payload = {"channel": channel_id, "name": reaction, "timestamp": convert_thread_ts(message_ts)}
+    payload = {
+        "channel": channel_id,
+        "name": reaction,
+        "timestamp": convert_thread_ts(message_ts),
+    }
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
@@ -137,4 +143,15 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
 
 
 if __name__ == "__main__":
-    mcp.run(transport=MCP_TRANSPORT)
+    if MCP_TRANSPORT == "stdio":
+        mcp.run_stdio_async()
+    elif MCP_TRANSPORT == "sse":
+        app = mcp.sse_app()
+        app.add_route("/metrics", metrics)
+        uvicorn.run(app, host="0.0.0.0")
+    elif MCP_TRANSPORT == "streamable-http":
+        app = mcp.streamable_http_app()
+        app.add_route("/metrics", metrics)
+        uvicorn.run(app, host="0.0.0.0")
+    else:
+        raise ValueError(f"Invalid transport: {MCP_TRANSPORT}")
