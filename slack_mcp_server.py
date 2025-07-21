@@ -4,7 +4,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 import re
 import uvicorn
-from metrics import metrics
+from metrics import metrics, track_tool_usage
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -64,6 +64,7 @@ def convert_thread_ts(ts: str) -> str:
 
 
 @mcp.tool()
+@track_tool_usage("get_channel_history")
 async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
     """Get the history of a channel."""
     await log_to_slack(f"Getting history of channel <#{channel_id}>")
@@ -75,6 +76,7 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+@track_tool_usage("post_message")
 async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
 ) -> bool:
@@ -91,6 +93,7 @@ async def post_message(
 
 
 @mcp.tool()
+@track_tool_usage("post_command")
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
 ) -> bool:
@@ -107,6 +110,7 @@ async def post_command(
 
 
 @mcp.tool()
+@track_tool_usage("add_reaction")
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     """Add a reaction to a message."""
     await log_to_slack(
@@ -123,6 +127,7 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
 
 
 @mcp.tool()
+@track_tool_usage("whoami")
 async def whoami() -> str:
     """Checks authentication & identity."""
     await log_to_slack("Checking authentication & identity")
@@ -132,6 +137,7 @@ async def whoami() -> str:
 
 
 @mcp.tool()
+@track_tool_usage("join_channel")
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
     if not skip_log:
