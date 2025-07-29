@@ -27,7 +27,7 @@ Example configuration for running with Podman:
         "SLACK_XOXC_TOKEN": "xoxc-...",
         "SLACK_XOXD_TOKEN": "xoxd-...",
         "MCP_TRANSPORT": "stdio",
-        "LOGS_CHANNEL_ID": "C7000000",
+        "LOGS_CHANNEL_ID": "C7000000"
       }
     }
   }
