@@ -111,7 +111,11 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
     url = f"{SLACK_API_BASE}/reactions.add"
-    payload = {"channel": channel_id, "name": reaction, "timestamp": convert_thread_ts(message_ts)}
+    payload = {
+        "channel": channel_id,
+        "name": reaction,
+        "timestamp": convert_thread_ts(message_ts),
+    }
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
