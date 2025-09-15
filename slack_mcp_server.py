@@ -111,7 +111,11 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
     url = f"{SLACK_API_BASE}/reactions.add"
-    payload = {"channel": channel_id, "name": reaction, "timestamp": convert_thread_ts(message_ts)}
+    payload = {
+        "channel": channel_id,
+        "name": reaction,
+        "timestamp": convert_thread_ts(message_ts),
+    }
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
@@ -134,6 +138,18 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
     return data.get("ok")
+
+
+@mcp.tool()
+async def send_dm(user_id: str, message: str) -> bool:
+    """Send a direct message to a user."""
+    await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
+    url = f"{SLACK_API_BASE}/conversations.open"
+    payload = {"users": user_id, "return_dm": True}
+    data = await make_request(url, payload=payload)
+    if data.get("ok"):
+        return post_message(data.get("channel").get("id"), message)
+    return False
 
 
 if __name__ == "__main__":
