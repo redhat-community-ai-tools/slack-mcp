@@ -136,5 +136,17 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     return data.get("ok")
 
 
+@mcp.tool()
+async def send_dm(user_id: str, message: str) -> bool:
+    """Send a direct message to a user."""
+    await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
+    url = f"{SLACK_API_BASE}/conversations.open"
+    payload = {"users": user_id, "return_dm": True}
+    data = await make_request(url, payload=payload)
+    if data.get("ok"):
+        return post_message(data.get("channel").get("id"), message)
+    return False
+
+
 if __name__ == "__main__":
     mcp.run(transport=MCP_TRANSPORT)
