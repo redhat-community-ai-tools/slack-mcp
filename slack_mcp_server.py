@@ -148,7 +148,7 @@ async def send_dm(user_id: str, message: str) -> bool:
     payload = {"users": user_id, "return_dm": True}
     data = await make_request(url, payload=payload)
     if data.get("ok"):
-        return post_message(data.get("channel").get("id"), message)
+        return await post_message(data.get("channel").get("id"), message)
     return False
 
 
