@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
 import re
@@ -14,7 +14,7 @@ mcp = FastMCP(
 
 
 async def make_request(
-    url: str, payload: dict[str, Any] | None = None
+    url: str, method: str = "POST", payload: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
     if MCP_TRANSPORT == "stdio":
         xoxc_token = os.environ["SLACK_XOXC_TOKEN"]
@@ -36,9 +36,24 @@ async def make_request(
 
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(
-                url, headers=headers, cookies=cookies, json=payload, timeout=30.0
-            )
+            if method.upper() == "GET":
+                response = await client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    cookies=cookies,
+                    params=payload,
+                    timeout=30.0,
+                )
+            else:
+                response = await client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    cookies=cookies,
+                    json=payload,
+                    timeout=30.0,
+                )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -150,6 +165,18 @@ async def send_dm(user_id: str, message: str) -> bool:
     if data.get("ok"):
         return await post_message(data.get("channel").get("id"), message)
     return False
+
+
+@mcp.tool()
+async def search_messages(
+    query: str, sort: Literal["timestamp", "score"] = "timestamp"
+) -> list[dict[str, Any]]:
+    """Search for messages in the workspace."""
+    await log_to_slack(f"Searching for messages: {query}")
+    url = f"{SLACK_API_BASE}/search.messages"
+    payload = {"query": query, "sort": sort}
+    data = await make_request(url, method="GET", payload=payload)
+    return data.get("messages", {}).get("matches", [])
 
 
 if __name__ == "__main__":
