@@ -3,6 +3,7 @@ from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
 import re
+import asyncio
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -11,6 +12,9 @@ OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
 
 # Cache for channel name to ID mapping
 _channel_cache: dict[str, str] = {}
+
+# Cache for user ID to handle mapping
+_user_cache: dict[str, str] = {}
 
 mcp = FastMCP(
     "slack", settings={"host": "127.0.0.1" if MCP_TRANSPORT == "stdio" else "0.0.0.0"}
@@ -67,25 +71,64 @@ async def log_to_slack(message: str):
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
-def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
+async def get_user_handle(user_id: str) -> str:
+    """Get user handle by ID with caching. Returns user_id if lookup fails."""
+    global _user_cache
+
+    if not user_id:
+        return ""
+
+    # Check cache first
+    if user_id in _user_cache:
+        return _user_cache[user_id]
+
+    # Cache miss - fetch user info
+    url = f"{SLACK_API_BASE}/users.info"
+    payload = {"user": user_id}
+    data = await make_request(url, method="GET", payload=payload)
+
+    if data and data.get("ok"):
+        user = data.get("user", {})
+        profile = user.get("profile", {})
+        # Prefer display_name, fall back to real_name, then name
+        handle = (
+            profile.get("display_name")
+            or user.get("real_name")
+            or user.get("name")
+            or user_id
+        )
+        _user_cache[user_id] = handle
+        return handle
+
+    # If lookup fails, cache the user_id itself to avoid repeated failed lookups
+    _user_cache[user_id] = user_id
+    return user_id
+
+
+async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
     """Filter message to only essential fields to reduce token usage."""
     # Extract essential fields
     text = message.get("text", "")
-    user = message.get("user", "")
+    user_id = message.get("user", "")
     ts = message.get("ts", "")
     thread_ts = message.get("thread_ts", "")
 
+    # Get user handle instead of ID
+    user_handle = await get_user_handle(user_id) if user_id else ""
+
     if OUTPUT_FORMAT == "json":
-        # Return structured JSON format
-        filtered = {}
-        essential_fields = ["text", "user", "ts", "thread_ts"]
-        for field in essential_fields:
-            if field in message:
-                filtered[field] = message[field]
+        # Return structured JSON format with handle instead of ID
+        filtered = {
+            "text": text,
+            "user": user_handle,
+            "ts": ts,
+        }
+        if thread_ts:
+            filtered["thread_ts"] = thread_ts
         return filtered
     else:
         # Return compact text format (default)
-        result = f"[{ts}] @{user}: {text}"
+        result = f"[{ts}] @{user_handle}: {text}"
         if thread_ts and thread_ts != ts:
             result += f" [thread:{thread_ts}]"
         return result
@@ -132,8 +175,14 @@ async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[s
             break
 
     print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
-    # Filter messages to reduce token usage
-    return [filter_message_fields(msg) for msg in all_messages]
+
+    # Pre-fetch all unique user handles to avoid duplicate API calls
+    unique_users = {msg.get("user") for msg in all_messages if msg.get("user")}
+    for user_id in unique_users:
+        await get_user_handle(user_id)
+
+    # Filter messages to reduce token usage (now all users are cached)
+    return await asyncio.gather(*[filter_message_fields(msg) for msg in all_messages])
 
 
 async def _load_channels_to_cache() -> bool:
@@ -188,6 +237,17 @@ async def refresh_channel_cache() -> bool:
     """Refresh the channel cache. Use this when new channels are created or if channel lookups are failing."""
     await log_to_slack("Refreshing channel cache")
     return await _load_channels_to_cache()
+
+
+@mcp.tool()
+async def refresh_user_cache() -> int:
+    """Clear the user cache. Use this when user handles are outdated or if user lookups are failing. Returns the number of cached entries cleared."""
+    global _user_cache
+    await log_to_slack("Clearing user cache")
+    count = len(_user_cache)
+    _user_cache.clear()
+    print(f"Cleared {count} user cache entries")
+    return count
 
 
 @mcp.tool()
@@ -308,8 +368,14 @@ async def search_messages(
         page += 1
 
     print(f"Retrieved {len(all_matches)} search results for query: {query}")
-    # Filter messages to reduce token usage
-    return [filter_message_fields(msg) for msg in all_matches]
+
+    # Pre-fetch all unique user handles to avoid duplicate API calls
+    unique_users = {msg.get("user") for msg in all_matches if msg.get("user")}
+    for user_id in unique_users:
+        await get_user_handle(user_id)
+
+    # Filter messages to reduce token usage (now all users are cached)
+    return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
 
 
 if __name__ == "__main__":
