@@ -4,6 +4,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 import re
 import asyncio
+from datetime import datetime, timezone
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -69,6 +70,55 @@ async def make_request(
 
 async def log_to_slack(message: str):
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
+
+
+def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
+    """Convert various date formats to Slack Unix timestamp.
+
+    Args:
+        date_str: Unix timestamp or ISO 8601 date string
+        is_end_of_range: If True and date has no time, use end of day (23:59:59.999999)
+                        If False and date has no time, use start of day (00:00:00)
+
+    Returns:
+        Unix timestamp as string with microsecond precision
+    """
+    if not date_str:
+        return ""
+
+    # Already a Unix timestamp (with or without microseconds)
+    if re.match(r"^\d+(\.\d+)?$", date_str):
+        return date_str
+
+    # Parse ISO 8601 date
+    try:
+        # Check if it's a date-only format (no time component)
+        is_date_only = re.match(r"^\d{4}-\d{2}-\d{2}$", date_str)
+
+        if is_date_only:
+            # Parse date and set time based on whether it's start or end of range
+            dt = datetime.fromisoformat(date_str)
+            if is_end_of_range:
+                # End of day: 23:59:59.999999
+                dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
+            else:
+                # Start of day: 00:00:00
+                dt = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        else:
+            # Has time component, parse as-is
+            # Handle both with and without timezone
+            if 'Z' in date_str:
+                date_str = date_str.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(date_str)
+            # If no timezone info, assume UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+        # Convert to Unix timestamp with microsecond precision
+        return f"{dt.timestamp():.6f}"
+    except ValueError as e:
+        print(f"Error parsing date '{date_str}': {e}")
+        return ""
 
 
 async def get_user_handle(user_id: str) -> str:
@@ -146,16 +196,36 @@ def convert_thread_ts(ts: str) -> str:
 
 
 @mcp.tool()
-async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[str, Any] | str]:
-    """Get the history of a channel with pagination support. Limit parameter controls max messages to fetch (default 1000)."""
+async def get_channel_history(
+    channel_id: str,
+    limit: int = 1000,
+    oldest: str = "",
+    latest: str = ""
+) -> list[dict[str, Any] | str]:
+    """Get the history of a channel with pagination support. Limit parameter controls max messages to fetch (default 1000).
+
+    Optional date filtering (accepts ISO 8601 dates or Unix timestamps):
+    - oldest: Only messages after this date (e.g., "2024-01-15" or "2024-01-15T10:30:00")
+    - latest: Only messages before this date (e.g., "2024-01-20" or "2024-01-20T18:00:00")
+
+    Note: For date-only formats, 'oldest' defaults to start of day (00:00:00) and 'latest' to end of day (23:59:59).
+    """
     await log_to_slack(f"Getting history of channel <#{channel_id}> (limit: {limit})")
     url = f"{SLACK_API_BASE}/conversations.history"
+
+    # Parse timestamp parameters
+    oldest_ts = parse_timestamp(oldest, is_end_of_range=False)
+    latest_ts = parse_timestamp(latest, is_end_of_range=True)
 
     all_messages = []
     cursor = None
 
     while len(all_messages) < limit:
         payload = {"channel": channel_id, "limit": min(200, limit - len(all_messages))}
+        if oldest_ts:
+            payload["oldest"] = oldest_ts
+        if latest_ts:
+            payload["latest"] = latest_ts
         if cursor:
             payload["cursor"] = cursor
 
