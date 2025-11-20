@@ -8,6 +8,9 @@ SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
 
+# Cache for channel name to ID mapping
+_channel_cache: dict[str, str] = {}
+
 mcp = FastMCP(
     "slack", settings={"host": "127.0.0.1" if MCP_TRANSPORT == "stdio" else "0.0.0.0"}
 )
@@ -83,6 +86,60 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
     data = await make_request(url, payload=payload)
     if data and data.get("ok"):
         return data.get("messages", [])
+
+
+async def _load_channels_to_cache() -> bool:
+    """Load all channels into the cache. Returns True if successful."""
+    global _channel_cache
+
+    url = f"{SLACK_API_BASE}/conversations.list"
+    payload = {"exclude_archived": "true", "types": "public_channel,private_channel"}
+    data = await make_request(url, method="GET", payload=payload)
+
+    if data and data.get("ok"):
+        channels = data.get("channels", [])
+        _channel_cache.clear()
+        for channel in channels:
+            channel_name = channel.get("name", "")
+            channel_id = channel.get("id", "")
+            if channel_name and channel_id:
+                _channel_cache[channel_name] = channel_id
+        print(f"Loaded {len(_channel_cache)} channels into cache")
+        return True
+
+    error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+    print(f"Error loading channels to cache: {error_msg}")
+    return False
+
+
+@mcp.tool()
+async def get_channel_id_by_name(channel_name: str) -> str:
+    """Get the channel ID by channel name. The channel name can be with or without the # prefix."""
+    # Remove # prefix if present
+    clean_name = channel_name.lstrip("#")
+    await log_to_slack(f"Looking up channel ID for channel name: {clean_name}")
+
+    # Check cache first
+    if clean_name in _channel_cache:
+        print(f"Channel '{clean_name}' found in cache")
+        return _channel_cache[clean_name]
+
+    # Cache miss - load all channels
+    print(f"Cache miss for '{clean_name}', loading channels...")
+    if await _load_channels_to_cache():
+        # Check cache again after loading
+        if clean_name in _channel_cache:
+            return _channel_cache[clean_name]
+
+    print(f"Channel '{clean_name}' not found")
+    return ""
+
+
+@mcp.tool()
+async def refresh_channel_cache() -> bool:
+    """Refresh the channel cache. Use this when new channels are created or if channel lookups are failing."""
+    await log_to_slack("Refreshing channel cache")
+    return await _load_channels_to_cache()
 
 
 @mcp.tool()
