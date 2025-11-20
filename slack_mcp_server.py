@@ -167,14 +167,43 @@ async def send_dm(user_id: str, message: str) -> bool:
 
 @mcp.tool()
 async def search_messages(
-    query: str, sort: Literal["timestamp", "score"] = "timestamp"
+    query: str, sort: Literal["timestamp", "score"] = "timestamp", limit: int = 1000
 ) -> list[dict[str, Any]]:
-    """Search for messages in the workspace."""
-    await log_to_slack(f"Searching for messages: {query}")
+    """Search for messages in the workspace with pagination support. Limit parameter controls max results to fetch (default 1000)."""
+    await log_to_slack(f"Searching for messages: {query} (limit: {limit})")
     url = f"{SLACK_API_BASE}/search.messages"
-    payload = {"query": query, "sort": sort}
-    data = await make_request(url, method="GET", payload=payload)
-    return data.get("messages", {}).get("matches", [])
+
+    all_matches = []
+    page = 1
+
+    while len(all_matches) < limit:
+        payload = {
+            "query": query,
+            "sort": sort,
+            "count": min(100, limit - len(all_matches)),  # Slack max is 100 per page
+            "page": page
+        }
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+            print(f"Error searching messages: {error_msg}")
+            break
+
+        messages_data = data.get("messages", {})
+        matches = messages_data.get("matches", [])
+        all_matches.extend(matches)
+
+        # Check pagination info
+        total_pages = messages_data.get("pagination", {}).get("page_count", 1)
+        if page >= total_pages or len(matches) == 0:
+            break
+
+        page += 1
+
+    print(f"Retrieved {len(all_matches)} search results for query: {query}")
+    return all_matches
 
 
 if __name__ == "__main__":
