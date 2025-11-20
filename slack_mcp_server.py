@@ -7,6 +7,7 @@ import re
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
+OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
 
 # Cache for channel name to ID mapping
 _channel_cache: dict[str, str] = {}
@@ -66,18 +67,28 @@ async def log_to_slack(message: str):
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
-def filter_message_fields(message: dict[str, Any]) -> dict[str, Any]:
+def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
     """Filter message to only essential fields to reduce token usage."""
-    filtered = {}
+    # Extract essential fields
+    text = message.get("text", "")
+    user = message.get("user", "")
+    ts = message.get("ts", "")
+    thread_ts = message.get("thread_ts", "")
 
-    # Keep only essential fields
-    essential_fields = ["text", "user", "ts", "thread_ts"]
-
-    for field in essential_fields:
-        if field in message:
-            filtered[field] = message[field]
-
-    return filtered
+    if OUTPUT_FORMAT == "json":
+        # Return structured JSON format
+        filtered = {}
+        essential_fields = ["text", "user", "ts", "thread_ts"]
+        for field in essential_fields:
+            if field in message:
+                filtered[field] = message[field]
+        return filtered
+    else:
+        # Return compact text format (default)
+        result = f"[{ts}] @{user}: {text}"
+        if thread_ts and thread_ts != ts:
+            result += f" [thread:{thread_ts}]"
+        return result
 
 
 # Validate and convert thread_ts if needed
@@ -92,7 +103,7 @@ def convert_thread_ts(ts: str) -> str:
 
 
 @mcp.tool()
-async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[str, Any]]:
+async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[str, Any] | str]:
     """Get the history of a channel with pagination support. Limit parameter controls max messages to fetch (default 1000)."""
     await log_to_slack(f"Getting history of channel <#{channel_id}> (limit: {limit})")
     url = f"{SLACK_API_BASE}/conversations.history"
@@ -262,7 +273,7 @@ async def send_dm(user_id: str, message: str) -> bool:
 @mcp.tool()
 async def search_messages(
     query: str, sort: Literal["timestamp", "score"] = "timestamp", limit: int = 1000
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any] | str]:
     """Search for messages in the workspace with pagination support. Limit parameter controls max results to fetch (default 1000)."""
     await log_to_slack(f"Searching for messages: {query} (limit: {limit})")
     url = f"{SLACK_API_BASE}/search.messages"
