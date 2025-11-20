@@ -34,14 +34,13 @@ async def make_request(
 
     cookies = {"d": xoxd_token}
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(cookies=cookies) as client:
         try:
             if method.upper() == "GET":
                 response = await client.request(
                     method,
                     url,
                     headers=headers,
-                    cookies=cookies,
                     params=payload,
                     timeout=30.0,
                 )
@@ -50,7 +49,6 @@ async def make_request(
                     method,
                     url,
                     headers=headers,
-                    cookies=cookies,
                     json=payload,
                     timeout=30.0,
                 )
