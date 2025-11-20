@@ -66,6 +66,20 @@ async def log_to_slack(message: str):
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
+def filter_message_fields(message: dict[str, Any]) -> dict[str, Any]:
+    """Filter message to only essential fields to reduce token usage."""
+    filtered = {}
+
+    # Keep only essential fields
+    essential_fields = ["text", "user", "ts", "thread_ts"]
+
+    for field in essential_fields:
+        if field in message:
+            filtered[field] = message[field]
+
+    return filtered
+
+
 # Validate and convert thread_ts if needed
 def convert_thread_ts(ts: str) -> str:
     # If ts is already in the correct format, return as is
@@ -107,7 +121,8 @@ async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[s
             break
 
     print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
-    return all_messages
+    # Filter messages to reduce token usage
+    return [filter_message_fields(msg) for msg in all_messages]
 
 
 async def _load_channels_to_cache() -> bool:
@@ -282,7 +297,8 @@ async def search_messages(
         page += 1
 
     print(f"Retrieved {len(all_matches)} search results for query: {query}")
-    return all_matches
+    # Filter messages to reduce token usage
+    return [filter_message_fields(msg) for msg in all_matches]
 
 
 if __name__ == "__main__":
