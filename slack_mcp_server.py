@@ -78,14 +78,36 @@ def convert_thread_ts(ts: str) -> str:
 
 
 @mcp.tool()
-async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
-    """Get the history of a channel."""
-    await log_to_slack(f"Getting history of channel <#{channel_id}>")
+async def get_channel_history(channel_id: str, limit: int = 1000) -> list[dict[str, Any]]:
+    """Get the history of a channel with pagination support. Limit parameter controls max messages to fetch (default 1000)."""
+    await log_to_slack(f"Getting history of channel <#{channel_id}> (limit: {limit})")
     url = f"{SLACK_API_BASE}/conversations.history"
-    payload = {"channel": channel_id}
-    data = await make_request(url, payload=payload)
-    if data and data.get("ok"):
-        return data.get("messages", [])
+
+    all_messages = []
+    cursor = None
+
+    while len(all_messages) < limit:
+        payload = {"channel": channel_id, "limit": min(200, limit - len(all_messages))}
+        if cursor:
+            payload["cursor"] = cursor
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+            print(f"Error getting channel history: {error_msg}")
+            break
+
+        messages = data.get("messages", [])
+        all_messages.extend(messages)
+
+        # Check if there are more messages
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
+    return all_messages
 
 
 async def _load_channels_to_cache() -> bool:
