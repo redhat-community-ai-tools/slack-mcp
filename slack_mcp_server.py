@@ -253,22 +253,41 @@ def convert_thread_ts(ts: str) -> str:
     return ""
 
 
+async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
+    """Get all replies in a thread."""
+    url = f"{SLACK_API_BASE}/conversations.replies"
+    payload = {"channel": channel_id, "ts": thread_ts}
+
+    data = await make_request(url, method="GET", payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        print(f"Error getting thread replies: {error_msg}")
+        return []
+
+    # Returns all messages including the parent, so we skip the first one
+    messages = data.get("messages", [])
+    return messages[1:] if len(messages) > 1 else []
+
+
 @mcp.tool()
 async def get_channel_history(
     channel_id: str,
     limit: int = 1000,
     oldest: str = "",
-    latest: str = ""
+    latest: str = "",
+    include_threads: bool = False
 ) -> list[dict[str, Any] | str]:
     """Get the history of a channel with pagination support. Limit parameter controls max messages to fetch (default 1000).
 
     Optional date filtering (accepts ISO 8601 dates or Unix timestamps):
     - oldest: Only messages after this date (e.g., "2024-01-15" or "2024-01-15T10:30:00")
     - latest: Only messages before this date (e.g., "2024-01-20" or "2024-01-20T18:00:00")
+    - include_threads: If True, also fetch all replies in threads (default False)
 
     Note: For date-only formats, 'oldest' defaults to start of day (00:00:00) and 'latest' to end of day (23:59:59).
     """
-    await log_to_slack(f"Getting history of channel <#{channel_id}> (limit: {limit})")
+    await log_to_slack(f"Getting history of channel <#{channel_id}> (limit: {limit}, include_threads: {include_threads})")
     url = f"{SLACK_API_BASE}/conversations.history"
 
     # Parse timestamp parameters
@@ -303,6 +322,21 @@ async def get_channel_history(
             break
 
     print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
+
+    # Fetch thread replies if requested
+    if include_threads:
+        thread_messages = []
+        for msg in all_messages:
+            # Check if message has replies (is a parent message)
+            reply_count = msg.get("reply_count", 0)
+            if reply_count > 0:
+                thread_ts = msg.get("ts")
+                if thread_ts:
+                    replies = await get_thread_replies(channel_id, thread_ts)
+                    thread_messages.extend(replies)
+
+        all_messages.extend(thread_messages)
+        print(f"Retrieved {len(thread_messages)} additional messages from threads")
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
     # Include both message authors and users mentioned in text
