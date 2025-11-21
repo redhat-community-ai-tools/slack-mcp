@@ -5,11 +5,17 @@ from mcp.server.fastmcp import FastMCP
 import re
 import asyncio
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
 OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
+
+# Cache file path (in same directory as script)
+SCRIPT_DIR = Path(__file__).parent
+USER_CACHE_FILE = SCRIPT_DIR / ".user_cache.json"
 
 # Cache for channel name to ID mapping
 _channel_cache: dict[str, str] = {}
@@ -121,6 +127,29 @@ def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
         return ""
 
 
+def _load_user_cache() -> None:
+    """Load user cache from disk."""
+    global _user_cache
+
+    try:
+        if USER_CACHE_FILE.exists():
+            with open(USER_CACHE_FILE, 'r') as f:
+                _user_cache = json.load(f)
+            print(f"Loaded {len(_user_cache)} user handles from cache")
+    except Exception as e:
+        print(f"Error loading user cache: {e}")
+        _user_cache = {}
+
+
+def _save_user_cache() -> None:
+    """Save user cache to disk."""
+    try:
+        with open(USER_CACHE_FILE, 'w') as f:
+            json.dump(_user_cache, f, indent=2)
+    except Exception as e:
+        print(f"Error saving user cache: {e}")
+
+
 async def get_user_handle(user_id: str) -> str:
     """Get user handle by ID with caching. Returns user_id if lookup fails."""
     global _user_cache
@@ -148,11 +177,37 @@ async def get_user_handle(user_id: str) -> str:
             or user_id
         )
         _user_cache[user_id] = handle
+        _save_user_cache()  # Persist to disk
         return handle
 
     # If lookup fails, cache the user_id itself to avoid repeated failed lookups
     _user_cache[user_id] = user_id
+    _save_user_cache()  # Persist to disk
     return user_id
+
+
+async def replace_user_mentions(text: str) -> str:
+    """Replace user ID mentions (<@USERID>) with handles (@handle)."""
+    if not text:
+        return text
+
+    # Find all user mentions in the format <@USERID>
+    mention_pattern = r'<@([A-Z0-9]+)>'
+    matches = re.finditer(mention_pattern, text)
+
+    # Process each mention
+    replacements = {}
+    for match in matches:
+        user_id = match.group(1)
+        if user_id not in replacements:
+            handle = await get_user_handle(user_id)
+            replacements[user_id] = handle
+
+    # Replace all mentions with handles
+    for user_id, handle in replacements.items():
+        text = text.replace(f'<@{user_id}>', f'@{handle}')
+
+    return text
 
 
 async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
@@ -165,6 +220,9 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
 
     # Get user handle instead of ID
     user_handle = await get_user_handle(user_id) if user_id else ""
+
+    # Replace user mentions in text with handles
+    text = await replace_user_mentions(text)
 
     if OUTPUT_FORMAT == "json":
         # Return structured JSON format with handle instead of ID
@@ -247,7 +305,18 @@ async def get_channel_history(
     print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
+    # Include both message authors and users mentioned in text
     unique_users = {msg.get("user") for msg in all_messages if msg.get("user")}
+
+    # Extract user IDs from mentions in message text
+    mention_pattern = r'<@([A-Z0-9]+)>'
+    for msg in all_messages:
+        text = msg.get("text", "")
+        if text:
+            mentioned_users = re.findall(mention_pattern, text)
+            unique_users.update(mentioned_users)
+
+    # Fetch all unique users
     for user_id in unique_users:
         await get_user_handle(user_id)
 
@@ -316,7 +385,15 @@ async def refresh_user_cache() -> int:
     await log_to_slack("Clearing user cache")
     count = len(_user_cache)
     _user_cache.clear()
-    print(f"Cleared {count} user cache entries")
+
+    # Also remove the cache file
+    try:
+        if USER_CACHE_FILE.exists():
+            USER_CACHE_FILE.unlink()
+            print(f"Cleared {count} user cache entries and deleted cache file")
+    except Exception as e:
+        print(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
+
     return count
 
 
@@ -440,7 +517,18 @@ async def search_messages(
     print(f"Retrieved {len(all_matches)} search results for query: {query}")
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
+    # Include both message authors and users mentioned in text
     unique_users = {msg.get("user") for msg in all_matches if msg.get("user")}
+
+    # Extract user IDs from mentions in message text
+    mention_pattern = r'<@([A-Z0-9]+)>'
+    for msg in all_matches:
+        text = msg.get("text", "")
+        if text:
+            mentioned_users = re.findall(mention_pattern, text)
+            unique_users.update(mentioned_users)
+
+    # Fetch all unique users
     for user_id in unique_users:
         await get_user_handle(user_id)
 
@@ -449,4 +537,6 @@ async def search_messages(
 
 
 if __name__ == "__main__":
+    # Load user cache from disk on startup
+    _load_user_cache()
     mcp.run(transport=MCP_TRANSPORT)
