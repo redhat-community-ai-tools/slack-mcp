@@ -1,5 +1,5 @@
 import os
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
 import re
@@ -67,6 +67,9 @@ async def log_to_slack(message: str):
 
 # Validate and convert thread_ts if needed
 def convert_thread_ts(ts: str) -> str:
+    # Strip leading 'p' from URL format (e.g., p1234567890123456)
+    if ts.startswith("p"):
+        ts = ts[1:]
     # If ts is already in the correct format, return as is
     if re.match(r"^\d+\.\d+$", ts):
         return ts
@@ -88,10 +91,31 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+async def get_thread_replies(
+    channel_id: str,
+    thread_ts: Annotated[str, "Parent message timestamp - use thread_ts from search results, or p-value from Slack URLs (e.g., p1234567890123456)"],
+) -> list[dict[str, Any]]:
+    """Get all replies in a thread. Use after search_messages to explore thread context."""
+    await log_to_slack(f"Getting thread replies in <#{channel_id}> for thread {thread_ts}")
+    url = f"{SLACK_API_BASE}/conversations.replies"
+    payload = {
+        "channel": channel_id,
+        "ts": convert_thread_ts(thread_ts),
+    }
+    data = await make_request(url, payload=payload)
+    if data and data.get("ok"):
+        return data.get("messages", [])
+    return []
+
+
+@mcp.tool()
 async def post_message(
-    channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
+    channel_id: str,
+    message: str,
+    thread_ts: Annotated[str, "Reply to thread - use ts/thread_ts from message, or p-value from URL"] = "",
+    skip_log: bool = False,
 ) -> bool:
-    """Post a message to a channel."""
+    """Post a message to a channel, optionally as a thread reply."""
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
     await join_channel(channel_id, skip_log=skip_log)
@@ -105,9 +129,12 @@ async def post_message(
 
 @mcp.tool()
 async def post_command(
-    channel_id: str, command: str, text: str, skip_log: bool = False
+    channel_id: str,
+    command: Annotated[str, "Slash command with leading slash (e.g., /remind, /poll)"],
+    text: Annotated[str, "Command arguments"],
+    skip_log: bool = False,
 ) -> bool:
-    """Post a command to a channel."""
+    """Execute a slash command in a channel."""
     if not skip_log:
         await log_to_slack(
             f"Posting command to channel <#{channel_id}>: {command} {text}"
@@ -120,7 +147,11 @@ async def post_command(
 
 
 @mcp.tool()
-async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
+async def add_reaction(
+    channel_id: str,
+    message_ts: Annotated[str, "Message timestamp - use ts from message, or p-value from URL"],
+    reaction: Annotated[str, "Emoji name without colons (e.g., thumbsup, heart, eyes)"],
+) -> bool:
     """Add a reaction to a message."""
     await log_to_slack(
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
@@ -169,9 +200,10 @@ async def send_dm(user_id: str, message: str) -> bool:
 
 @mcp.tool()
 async def search_messages(
-    query: str, sort: Literal["timestamp", "score"] = "timestamp"
+    query: Annotated[str, "Search query - supports from:@user, in:#channel, has:link, before/after:date"],
+    sort: Literal["timestamp", "score"] = "timestamp",
 ) -> list[dict[str, Any]]:
-    """Search for messages in the workspace."""
+    """Search for messages in the workspace. Results include ts and thread_ts for use with get_thread_replies."""
     await log_to_slack(f"Searching for messages: {query}")
     url = f"{SLACK_API_BASE}/search.messages"
     payload = {"query": query, "sort": sort}
