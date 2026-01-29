@@ -94,7 +94,7 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
 async def get_thread_replies(
     channel_id: str,
     thread_ts: Annotated[str, "Parent message timestamp - use thread_ts from search results, or p-value from Slack URLs (e.g., p1234567890123456)"],
-    limit: Annotated[int, "Max replies to return, 0 for all (default 20)"] = 20,
+    limit: Annotated[int, "Max replies to return, 0 for all"] = 0,
 ) -> list[dict[str, str]]:
     """Get replies in a thread. Returns slim format: ts, user, text only."""
     await log_to_slack(f"Getting thread replies in <#{channel_id}> for thread {thread_ts}")
