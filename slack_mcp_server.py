@@ -94,17 +94,24 @@ async def get_channel_history(channel_id: str) -> list[dict[str, Any]]:
 async def get_thread_replies(
     channel_id: str,
     thread_ts: Annotated[str, "Parent message timestamp - use thread_ts from search results, or p-value from Slack URLs (e.g., p1234567890123456)"],
-) -> list[dict[str, Any]]:
-    """Get all replies in a thread. Use after search_messages to explore thread context."""
+    limit: Annotated[int, "Max replies to return, 0 for all (default 20)"] = 20,
+) -> list[dict[str, str]]:
+    """Get replies in a thread. Returns slim format: ts, user, text only."""
     await log_to_slack(f"Getting thread replies in <#{channel_id}> for thread {thread_ts}")
     url = f"{SLACK_API_BASE}/conversations.replies"
-    payload = {
+    params = {
         "channel": channel_id,
         "ts": convert_thread_ts(thread_ts),
     }
-    data = await make_request(url, payload=payload)
+    data = await make_request(url, method="GET", payload=params)
     if data and data.get("ok"):
-        return data.get("messages", [])
+        messages = data.get("messages", [])
+        if limit > 0:
+            messages = messages[-limit:]
+        return [
+            {"ts": m.get("ts", ""), "user": m.get("user", ""), "text": m.get("text", "")}
+            for m in messages
+        ]
     return []
 
 
