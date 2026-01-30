@@ -131,7 +131,7 @@ async def post_message(
     if thread_ts:
         payload["thread_ts"] = convert_thread_ts(thread_ts)
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @mcp.tool()
@@ -150,7 +150,7 @@ async def post_command(
     url = f"{SLACK_API_BASE}/chat.command"
     payload = {"channel": channel_id, "command": command, "text": text}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @mcp.tool()
@@ -170,7 +170,7 @@ async def add_reaction(
         "timestamp": convert_thread_ts(message_ts),
     }
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @mcp.tool()
@@ -179,7 +179,7 @@ async def whoami() -> str:
     await log_to_slack("Checking authentication & identity")
     url = f"{SLACK_API_BASE}/auth.test"
     data = await make_request(url)
-    return data.get("user")
+    return data.get("user") if data else ""
 
 
 @mcp.tool()
@@ -190,7 +190,7 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     url = f"{SLACK_API_BASE}/conversations.join"
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @mcp.tool()
@@ -200,8 +200,8 @@ async def send_dm(user_id: str, message: str) -> bool:
     url = f"{SLACK_API_BASE}/conversations.open"
     payload = {"users": user_id, "return_dm": True}
     data = await make_request(url, payload=payload)
-    if data.get("ok"):
-        return await post_message(data.get("channel").get("id"), message)
+    if data and data.get("ok"):
+        return await post_message(data.get("channel", {}).get("id"), message)
     return False
 
 
@@ -215,7 +215,9 @@ async def search_messages(
     url = f"{SLACK_API_BASE}/search.messages"
     payload = {"query": query, "sort": sort}
     data = await make_request(url, method="GET", payload=payload)
-    return data.get("messages", {}).get("matches", [])
+    if data:
+        return data.get("messages", {}).get("matches", [])
+    return []
 
 
 if __name__ == "__main__":
