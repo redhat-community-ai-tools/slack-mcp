@@ -218,6 +218,11 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
     ts = message.get("ts", "")
     thread_ts = message.get("thread_ts", "")
 
+    # Extract channel info (present in search results)
+    channel = message.get("channel", {})
+    channel_id = channel.get("id", "") if isinstance(channel, dict) else ""
+    channel_name = channel.get("name", "") if isinstance(channel, dict) else ""
+
     # Get user handle instead of ID
     user_handle = await get_user_handle(user_id) if user_id else ""
 
@@ -233,10 +238,16 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
         }
         if thread_ts:
             filtered["thread_ts"] = thread_ts
+        if channel_id:
+            filtered["channel_id"] = channel_id
+        if channel_name:
+            filtered["channel_name"] = channel_name
         return filtered
     else:
         # Return compact text format (default)
         result = f"[{ts}] @{user_handle}: {text}"
+        if channel_id:
+            result += f" [channel:{channel_id}|{channel_name}]"
         if thread_ts and thread_ts != ts:
             result += f" [thread:{thread_ts}]"
         return result
@@ -268,6 +279,48 @@ async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, 
     # Returns all messages including the parent, so we skip the first one
     messages = data.get("messages", [])
     return messages[1:] if len(messages) > 1 else []
+
+
+@mcp.tool()
+async def get_thread(
+    channel_id: str,
+    thread_ts: str,
+    limit: int = 100
+) -> list[dict[str, Any] | str]:
+    """Get all messages in a thread given a channel ID and the parent message timestamp.
+
+    Use this to read a full conversation thread before replying to it.
+    The thread_ts is the timestamp of the parent message that started the thread.
+    """
+    await log_to_slack(f"Getting thread {thread_ts} in channel <#{channel_id}> (limit: {limit})")
+    url = f"{SLACK_API_BASE}/conversations.replies"
+    payload = {
+        "channel": channel_id,
+        "ts": convert_thread_ts(thread_ts),
+        "limit": limit,
+    }
+
+    data = await make_request(url, method="GET", payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        print(f"Error getting thread: {error_msg}")
+        return []
+
+    messages = data.get("messages", [])
+    print(f"Retrieved {len(messages)} messages from thread {thread_ts}")
+
+    # Pre-fetch all unique user handles
+    unique_users = {msg.get("user") for msg in messages if msg.get("user")}
+    mention_pattern = r'<@([A-Z0-9]+)>'
+    for msg in messages:
+        text = msg.get("text", "")
+        if text:
+            unique_users.update(re.findall(mention_pattern, text))
+    for user_id in unique_users:
+        await get_user_handle(user_id)
+
+    return await asyncio.gather(*[filter_message_fields(msg) for msg in messages])
 
 
 @mcp.tool()
@@ -359,27 +412,41 @@ async def get_channel_history(
 
 
 async def _load_channels_to_cache() -> bool:
-    """Load all channels into the cache. Returns True if successful."""
+    """Load all channels into the cache with pagination. Returns True if successful."""
     global _channel_cache
 
     url = f"{SLACK_API_BASE}/conversations.list"
-    payload = {"exclude_archived": "true", "types": "public_channel,private_channel"}
-    data = await make_request(url, method="GET", payload=payload)
+    _channel_cache.clear()
+    cursor = None
 
-    if data and data.get("ok"):
-        channels = data.get("channels", [])
-        _channel_cache.clear()
-        for channel in channels:
+    while True:
+        payload = {
+            "exclude_archived": "true",
+            "types": "public_channel,private_channel",
+            "limit": 200,
+        }
+        if cursor:
+            payload["cursor"] = cursor
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+            print(f"Error loading channels to cache: {error_msg}")
+            return bool(_channel_cache)
+
+        for channel in data.get("channels", []):
             channel_name = channel.get("name", "")
             channel_id = channel.get("id", "")
             if channel_name and channel_id:
                 _channel_cache[channel_name] = channel_id
-        print(f"Loaded {len(_channel_cache)} channels into cache")
-        return True
 
-    error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-    print(f"Error loading channels to cache: {error_msg}")
-    return False
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    print(f"Loaded {len(_channel_cache)} channels into cache")
+    return True
 
 
 @mcp.tool()
