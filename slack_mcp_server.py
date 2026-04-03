@@ -23,9 +23,7 @@ _channel_cache: dict[str, str] = {}
 # Cache for user ID to handle mapping
 _user_cache: dict[str, str] = {}
 
-mcp = FastMCP(
-    "slack", settings={"host": "127.0.0.1" if MCP_TRANSPORT == "stdio" else "0.0.0.0"}
-)
+mcp = FastMCP("slack")
 
 
 async def make_request(
