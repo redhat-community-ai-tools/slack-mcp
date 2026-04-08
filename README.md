@@ -26,6 +26,69 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 - **Knowledge Base**: AI that can search through channel history and provide context
 - **Meeting Scheduler**: AI that can read meeting requests and help coordinate schedules
 
+## Setting Up with Claude Code
+
+This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
+
+### Option 1: Let Claude do everything (recommended)
+
+Paste this prompt into Claude Code:
+
+```
+I want to set up the redhat-community-ai-tools/slack-mcp server for Claude Code.
+Please add it as a plugin marketplace source in my ~/.claude/settings.json, then
+guide me through the full setup including token extraction and MCP registration.
+```
+
+Claude will edit your settings, install the plugin, extract your Slack tokens via
+Playwright, create a wrapper script, and register the MCP server — asking for
+confirmation at each interactive step.
+
+### Option 2: Install the plugin first, then ask Claude
+
+If you prefer to install the plugin manually first:
+
+**1.** Add the following to `~/.claude/settings.json` (create the `extraKnownMarketplaces` key if it doesn't exist):
+
+```json
+"extraKnownMarketplaces": {
+  "redhat-community-ai-tools": {
+    "source": {
+      "source": "settings",
+      "name": "redhat-community-ai-tools",
+      "plugins": [
+        {
+          "name": "slack-mcp",
+          "source": {
+            "source": "github",
+            "repo": "redhat-community-ai-tools/slack-mcp"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**2.** In Claude Code, run:
+```
+/reload-plugins
+```
+
+**3.** Then install the plugin:
+```
+/plugin install slack-mcp@redhat-community-ai-tools
+```
+
+**4.** Now tell Claude:
+```
+Set up the Slack MCP server
+```
+
+Claude will use the built-in skill to guide you through token extraction and MCP registration.
+
+---
+
 ## Running with Podman or Docker
 
 You can run the slack-mcp server in a container using Podman or Docker:

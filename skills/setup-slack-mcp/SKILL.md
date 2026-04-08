@@ -10,6 +10,47 @@ Guide the user step-by-step through setting up the [redhat-community-ai-tools/sl
 
 The server uses browser session tokens (`xoxc`/`xoxd`) extracted from a logged-in Slack session — no Slack admin approval or OAuth app required.
 
+## Step 0: Ensure This Plugin Is Installed
+
+Check if the plugin is already installed:
+
+```bash
+cat ~/.claude/plugins/installed_plugins.json 2>/dev/null || echo '{}'
+```
+
+If `slack-mcp` does not appear in the output, the plugin needs to be registered as a marketplace source first. Read `~/.claude/settings.json` and add `redhat-community-ai-tools` under `extraKnownMarketplaces` (create the key if it doesn't exist, preserve all existing content):
+
+```json
+"extraKnownMarketplaces": {
+  "redhat-community-ai-tools": {
+    "source": {
+      "source": "settings",
+      "name": "redhat-community-ai-tools",
+      "plugins": [
+        {
+          "name": "slack-mcp",
+          "source": {
+            "source": "github",
+            "repo": "redhat-community-ai-tools/slack-mcp"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Then tell the user:
+
+> I've updated your `~/.claude/settings.json`. Please run these two commands in the Claude Code prompt box, then come back:
+>
+> 1. `/reload-plugins`
+> 2. `/plugin install slack-mcp@redhat-community-ai-tools`
+>
+> Once installed, tell me and I'll continue the setup.
+
+**Wait for the user to confirm before proceeding.**
+
 ## Step 1: Check Prerequisites
 
 ```bash
@@ -45,6 +86,12 @@ Log in to Slack when the browser opens, then follow the terminal prompts. Tokens
 
 After the first login the session is persisted, so future runs can use `--headless`.
 
+Tell the user to run this command in the Claude Code prompt box (with `!` prefix to run it in the session):
+
+> `! cd ~/repos/slack-token-extractor && .venv/bin/python playwright_extract.py`
+
+**Wait for the user to confirm the tokens were extracted before proceeding.**
+
 ## Step 4: Find Your Logs Channel ID
 
 The MCP server requires a `LOGS_CHANNEL_ID` — a Slack channel where it will log activity.
@@ -56,7 +103,7 @@ Ask the user which channel they want to use, then record the ID.
 
 ## Step 5: Create the Wrapper Script
 
-Create a script that sources the tokens from the env file at runtime (so tokens are never stored in the MCP config):
+Create a script that sources the tokens from the env file at runtime (so tokens are never stored in the MCP config).
 
 Write the following to `~/repos/slack-token-extractor/run-slack-mcp.sh`, substituting the user's actual channel ID for `CXXXXXXXXX`:
 
@@ -96,9 +143,9 @@ claude mcp add -s user slack ~/repos/slack-token-extractor/run-slack-mcp.sh
 
 ## Step 7: Verify
 
-Restart Claude Code. The `slack` MCP server should now appear in the available tools.
+Tell the user to restart Claude Code. The `slack` MCP server should now appear in the available tools.
 
-To test it, ask Claude: *"What channels do I have access to in Slack?"*
+Suggest they test it by asking: *"What channels do I have access to in Slack?"*
 
 ## Token Refresh
 
