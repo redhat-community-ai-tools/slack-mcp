@@ -14,9 +14,8 @@ What this script does (automatically):
 
 Usage:
   python3 setup-slack-mcp.py
-  python3 setup-slack-mcp.py --refresh-tokens           # re-extract tokens
-  python3 setup-slack-mcp.py --workspace https://myco.slack.com
-  python3 setup-slack-mcp.py --logs-channel DXXXXXXXXX  # skip the prompt
+  python3 setup-slack-mcp.py --refresh-tokens                    # re-extract tokens
+  python3 setup-slack-mcp.py --set-logs-channel DXXXXXXXXX       # skip the prompt
 """
 
 import argparse
@@ -197,10 +196,22 @@ with sync_playwright() as p:
         print()
         print("  " + "=" * 56)
         print("  Log in to Slack in the browser window that just opened.")
-        print("  Once you can see your workspace, come back here and")
-        print("  press ENTER to continue.")
+        print()
+        print("  Before pressing ENTER, find your logs channel ID:")
+        print("    1. Navigate to the channel or DM you want to use")
+        print("       - Self-DM: click your own name in the left sidebar")
+        print("       - Slackbot: click 'Slackbot' in the left sidebar")
+        print("       - Channel:  click the channel name")
+        print("    2. Copy the last segment of the URL, e.g.:")
+        print("       https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
+        print("                                              ^^^^^^^^^^^^ this part")
+        print("       (IDs start with C, D, or G)")
+        print()
+        print("  Then come back here and press ENTER to continue.")
         print("  " + "=" * 56)
         input("  > ")
+        print()
+        print("  Fetching tokens... The browser window will close in about a minute.")
         try:
             page.wait_for_url("**/client/**", timeout=10000)
             page.wait_for_load_state("networkidle", timeout=30000)
@@ -371,17 +382,6 @@ def prompt_logs_channel() -> str:
 
     print("""  The MCP server writes internal activity logs to a Slack channel.
   Any channel works — a self-DM or DM with Slackbot is easiest.
-
-  How to find the channel ID:
-    1. Open https://app.slack.com in a browser (not the desktop app)
-    2. Navigate to the channel or DM you want to use
-       - Self-DM: click your own name in the left sidebar
-       - Slackbot: click "Slackbot" in the left sidebar
-       - Channel:  click the channel name
-    3. Copy the last segment of the URL, e.g.:
-       https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX
-                                               ^^^^^^^^^^^ this part
-  IDs start with C (channel), D (direct message), or G (group DM).
 """)
 
     while True:
@@ -398,16 +398,22 @@ def verify() -> None:
     """Quick smoke-test: run the MCP server and send a JSON-RPC ping."""
     banner("Verifying MCP server")
 
-    test_payload = json.dumps({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/list",
-        "params": {},
-    }).encode()
+    def msg(**kwargs) -> bytes:
+        return (json.dumps(kwargs) + "\n").encode()
+
+    payload = (
+        msg(jsonrpc="2.0", id=1, method="initialize", params={
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "setup-slack-mcp", "version": "1.0"},
+        })
+        + msg(jsonrpc="2.0", method="notifications/initialized", params={})
+        + msg(jsonrpc="2.0", id=2, method="tools/list", params={})
+    )
 
     result = subprocess.run(
         [str(WRAPPER_SCRIPT)],
-        input=test_payload,
+        input=payload,
         capture_output=True,
         timeout=30,
     )
@@ -430,8 +436,7 @@ def main() -> None:
 Examples:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens
-  python3 setup-slack-mcp.py --workspace https://myco.slack.com
-  python3 setup-slack-mcp.py --logs-channel C01234567
+  python3 setup-slack-mcp.py --set-logs-channel C01234567
         """,
     )
     parser.add_argument(
@@ -440,13 +445,7 @@ Examples:
         help="Re-extract Slack tokens even if they already exist",
     )
     parser.add_argument(
-        "--workspace",
-        default=DEFAULT_WORKSPACE,
-        metavar="URL",
-        help=f"Slack workspace URL (default: {DEFAULT_WORKSPACE})",
-    )
-    parser.add_argument(
-        "--logs-channel",
+        "--set-logs-channel",
         default="",
         metavar="CHANNEL_ID",
         help="Slack channel ID for MCP server log output (prompted interactively if not set)",
@@ -459,9 +458,9 @@ Examples:
     args = parser.parse_args()
 
     print()
-    print("╔══════════════════════════════════════════════════════════╗")
+    print("╔═══════════════════════════════════════════════════════════╗")
     print("║       Slack MCP Setup for Claude Code                   ║")
-    print("╚══════════════════════════════════════════════════════════╝")
+    print("╚═══════════════════════════════════════════════════════════╝")
     print()
     print("  One manual step required: log in to Slack when the")
     print("  browser opens. Everything else is automatic.")
@@ -469,8 +468,8 @@ Examples:
     check_prerequisites()
     python = setup_venv()
     pull_image()
-    extract_tokens(python, args.workspace, refresh=args.refresh_tokens)
-    logs_channel = args.logs_channel or prompt_logs_channel()
+    extract_tokens(python, DEFAULT_WORKSPACE, refresh=args.refresh_tokens)
+    logs_channel = args.set_logs_channel or prompt_logs_channel()
     write_wrapper(logs_channel)
     register_mcp()
 
@@ -478,9 +477,9 @@ Examples:
         verify()
 
     print()
-    print("╔══════════════════════════════════════════════════════════╗")
+    print("╔═══════════════════════════════════════════════════════════╗")
     print("║  Setup complete!                                         ║")
-    print("╚══════════════════════════════════════════════════════════╝")
+    print("╚═══════════════════════════════════════════════════════════╝")
     print()
     print(f"  MCP server name : {MCP_SERVER_NAME}")
     print(f"  Wrapper script  : {WRAPPER_SCRIPT}")
@@ -488,6 +487,7 @@ Examples:
     print(f"  Claude settings : {CLAUDE_SETTINGS}")
     print()
     print("  Start a new Claude Code session to activate the plugin.")
+    print("  Test it by asking: 'What is my username in Slack?'")
     print()
     print("  To refresh tokens when they expire:")
     print("    python3 setup-slack-mcp.py --refresh-tokens")
