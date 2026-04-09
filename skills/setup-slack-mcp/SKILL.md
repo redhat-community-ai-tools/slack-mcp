@@ -84,7 +84,13 @@ Tell the user:
 > .venv/bin/python playwright_extract.py
 > ```
 >
-> A Chromium browser window will open. Log in to Slack normally. Once you're logged in, return to the terminal and follow any prompts. When it finishes, tokens are saved to `.slack_tokens.env` in that directory.
+> A Chromium browser window will open. Log in to Slack normally. Once you're logged in, return to the terminal. When the script asks:
+>
+> ```
+> Do you want to save your tokens to '.slack_tokens.env'? [Y/n]
+> ```
+>
+> Enter `Y` to save. The tokens will be written to `.slack_tokens.env` in that directory.
 >
 > **Optional:** If you have multiple workspaces and want to target a specific one, pass `--workspace https://yourworkspace.slack.com`.
 >
