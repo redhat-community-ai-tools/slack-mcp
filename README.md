@@ -30,9 +30,7 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 
 This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
 
-### Option 1: Automated setup script (fastest)
-
-Run the setup script directly. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering a channel ID for server logs.
+Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering a channel ID for server logs.
 
 ```bash
 python3 <(curl -fsSL https://raw.githubusercontent.com/redhat-community-ai-tools/slack-mcp/main/scripts/setup-slack-mcp.py)
@@ -58,62 +56,6 @@ When tokens expire, just run:
 ```bash
 python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
 ```
-
-### Option 2: Let Claude do everything
-
-Paste this prompt into Claude Code:
-
-```
-I want to set up the redhat-community-ai-tools/slack-mcp server for Claude Code.
-Please add it as a plugin marketplace source in my ~/.claude/settings.json, then
-guide me through the full setup including token extraction and MCP registration.
-```
-
-Claude will edit your settings, install the plugin, run the setup script, and
-register the MCP server.
-
-### Option 3: Install the plugin first, then ask Claude
-
-If you prefer to install the plugin manually first:
-
-**1.** Add the following to `~/.claude/settings.json` (create the `extraKnownMarketplaces` key if it doesn't exist):
-
-```json
-"extraKnownMarketplaces": {
-  "redhat-community-ai-tools": {
-    "source": {
-      "source": "settings",
-      "name": "redhat-community-ai-tools",
-      "plugins": [
-        {
-          "name": "slack-mcp",
-          "source": {
-            "source": "github",
-            "repo": "redhat-community-ai-tools/slack-mcp"
-          }
-        }
-      ]
-    }
-  }
-}
-```
-
-**2.** In Claude Code, run:
-```
-/reload-plugins
-```
-
-**3.** Then install the plugin:
-```
-/plugin install slack-mcp@redhat-community-ai-tools
-```
-
-**4.** Now tell Claude:
-```
-Set up the Slack MCP server
-```
-
-Claude will use the built-in skill to run the setup script and guide you through any remaining steps.
 
 ---
 
