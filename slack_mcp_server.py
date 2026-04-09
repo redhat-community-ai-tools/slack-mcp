@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -7,6 +8,11 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+
+
+def log(msg: str) -> None:
+    """Write diagnostic output to stderr (stdout is reserved for JSON-RPC in stdio mode)."""
+    print(msg, file=sys.stderr, flush=True)
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -68,7 +74,7 @@ async def make_request(
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(e)
+            log(str(e))
             return None
 
 
@@ -121,7 +127,7 @@ def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
         # Convert to Unix timestamp with microsecond precision
         return f"{dt.timestamp():.6f}"
     except ValueError as e:
-        print(f"Error parsing date '{date_str}': {e}")
+        log(f"Error parsing date '{date_str}': {e}")
         return ""
 
 
@@ -133,9 +139,9 @@ def _load_user_cache() -> None:
         if USER_CACHE_FILE.exists():
             with open(USER_CACHE_FILE, 'r') as f:
                 _user_cache = json.load(f)
-            print(f"Loaded {len(_user_cache)} user handles from cache")
+            log(f"Loaded {len(_user_cache)} user handles from cache")
     except Exception as e:
-        print(f"Error loading user cache: {e}")
+        log(f"Error loading user cache: {e}")
         _user_cache = {}
 
 
@@ -145,7 +151,7 @@ def _save_user_cache() -> None:
         with open(USER_CACHE_FILE, 'w') as f:
             json.dump(_user_cache, f, indent=2)
     except Exception as e:
-        print(f"Error saving user cache: {e}")
+        log(f"Error saving user cache: {e}")
 
 
 async def get_user_handle(user_id: str) -> str:
@@ -271,7 +277,7 @@ async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, 
 
     if not data or not data.get("ok"):
         error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-        print(f"Error getting thread replies: {error_msg}")
+        log(f"Error getting thread replies: {error_msg}")
         return []
 
     # Returns all messages including the parent, so we skip the first one
@@ -302,11 +308,11 @@ async def get_thread(
 
     if not data or not data.get("ok"):
         error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-        print(f"Error getting thread: {error_msg}")
+        log(f"Error getting thread: {error_msg}")
         return []
 
     messages = data.get("messages", [])
-    print(f"Retrieved {len(messages)} messages from thread {thread_ts}")
+    log(f"Retrieved {len(messages)} messages from thread {thread_ts}")
 
     # Pre-fetch all unique user handles
     unique_users = {msg.get("user") for msg in messages if msg.get("user")}
@@ -361,7 +367,7 @@ async def get_channel_history(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            print(f"Error getting channel history: {error_msg}")
+            log(f"Error getting channel history: {error_msg}")
             break
 
         messages = data.get("messages", [])
@@ -372,7 +378,7 @@ async def get_channel_history(
         if not cursor:
             break
 
-    print(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
+    log(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
 
     # Fetch thread replies if requested
     if include_threads:
@@ -387,7 +393,7 @@ async def get_channel_history(
                     thread_messages.extend(replies)
 
         all_messages.extend(thread_messages)
-        print(f"Retrieved {len(thread_messages)} additional messages from threads")
+        log(f"Retrieved {len(thread_messages)} additional messages from threads")
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
     # Include both message authors and users mentioned in text
@@ -430,7 +436,7 @@ async def _load_channels_to_cache() -> bool:
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            print(f"Error loading channels to cache: {error_msg}")
+            log(f"Error loading channels to cache: {error_msg}")
             return bool(_channel_cache)
 
         for channel in data.get("channels", []):
@@ -443,7 +449,7 @@ async def _load_channels_to_cache() -> bool:
         if not cursor:
             break
 
-    print(f"Loaded {len(_channel_cache)} channels into cache")
+    log(f"Loaded {len(_channel_cache)} channels into cache")
     return True
 
 
@@ -456,17 +462,17 @@ async def get_channel_id_by_name(channel_name: str) -> str:
 
     # Check cache first
     if clean_name in _channel_cache:
-        print(f"Channel '{clean_name}' found in cache")
+        log(f"Channel '{clean_name}' found in cache")
         return _channel_cache[clean_name]
 
     # Cache miss - load all channels
-    print(f"Cache miss for '{clean_name}', loading channels...")
+    log(f"Cache miss for '{clean_name}', loading channels...")
     if await _load_channels_to_cache():
         # Check cache again after loading
         if clean_name in _channel_cache:
             return _channel_cache[clean_name]
 
-    print(f"Channel '{clean_name}' not found")
+    log(f"Channel '{clean_name}' not found")
     return ""
 
 
@@ -489,9 +495,9 @@ async def refresh_user_cache() -> int:
     try:
         if USER_CACHE_FILE.exists():
             USER_CACHE_FILE.unlink()
-            print(f"Cleared {count} user cache entries and deleted cache file")
+            log(f"Cleared {count} user cache entries and deleted cache file")
     except Exception as e:
-        print(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
+        log(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
 
     return count
 
@@ -599,7 +605,7 @@ async def search_messages(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            print(f"Error searching messages: {error_msg}")
+            log(f"Error searching messages: {error_msg}")
             break
 
         messages_data = data.get("messages", {})
@@ -613,7 +619,7 @@ async def search_messages(
 
         page += 1
 
-    print(f"Retrieved {len(all_matches)} search results for query: {query}")
+    log(f"Retrieved {len(all_matches)} search results for query: {query}")
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
     # Include both message authors and users mentioned in text
