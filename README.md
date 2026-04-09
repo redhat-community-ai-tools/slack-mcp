@@ -30,7 +30,36 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 
 This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
 
-### Option 1: Let Claude do everything (recommended)
+### Option 1: Automated setup script (fastest)
+
+Run the setup script directly. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering a channel ID for server logs.
+
+```bash
+python3 <(curl -fsSL https://raw.githubusercontent.com/redhat-community-ai-tools/slack-mcp/main/scripts/setup-slack-mcp.py)
+```
+
+Or clone the repo first and run it locally:
+
+```bash
+git clone https://github.com/redhat-community-ai-tools/slack-mcp
+python3 slack-mcp/scripts/setup-slack-mcp.py
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--logs-channel DXXXXXXXXX` | Slack channel ID for server logs (prompted if omitted) |
+| `--workspace https://myco.slack.com` | Specific Slack workspace to open |
+| `--refresh-tokens` | Re-extract tokens when they expire (skips all other steps) |
+| `--skip-verify` | Skip the post-setup smoke test |
+
+When tokens expire, just run:
+```bash
+python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
+```
+
+### Option 2: Let Claude do everything
 
 Paste this prompt into Claude Code:
 
@@ -40,11 +69,10 @@ Please add it as a plugin marketplace source in my ~/.claude/settings.json, then
 guide me through the full setup including token extraction and MCP registration.
 ```
 
-Claude will edit your settings, install the plugin, extract your Slack tokens via
-Playwright, create a wrapper script, and register the MCP server — asking for
-confirmation at each interactive step.
+Claude will edit your settings, install the plugin, run the setup script, and
+register the MCP server.
 
-### Option 2: Install the plugin first, then ask Claude
+### Option 3: Install the plugin first, then ask Claude
 
 If you prefer to install the plugin manually first:
 
@@ -85,7 +113,7 @@ If you prefer to install the plugin manually first:
 Set up the Slack MCP server
 ```
 
-Claude will use the built-in skill to guide you through token extraction and MCP registration.
+Claude will use the built-in skill to run the setup script and guide you through any remaining steps.
 
 ---
 
