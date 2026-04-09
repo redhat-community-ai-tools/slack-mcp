@@ -100,20 +100,37 @@ Tell the user:
 
 ## Step 4: Find Your Logs Channel ID
 
-The MCP server requires a `LOGS_CHANNEL_ID` — a Slack channel where it will log its activity. It does not need to be a shared or active channel; a private channel or a DM works fine.
+### Why is this needed?
 
-**Good options (pick one):**
-- A **DM with yourself** — open Slack in a browser, click your own name in the sidebar to open a DM with yourself
-- A **DM with Slackbot** — click Slackbot in the sidebar
-- A **private channel** you create just for this purpose (e.g., `#claude-mcp-logs`)
+The MCP server requires a dedicated Slack channel to write internal activity logs — things like errors, connection events, and debug output from the server itself. This keeps operational noise out of your real Slack conversations and gives you a place to look if something isn't working. The channel does not need to be shared with anyone; it just needs to exist and be accessible with your session tokens.
 
-**To find the channel ID:**
-1. Open Slack in a browser (not the desktop app)
-2. Navigate to the channel or DM you want to use
-3. Look at the URL: `https://app.slack.com/client/TXXXXXXXX/`**`CXXXXXXXXX`**
-4. The last path segment (starts with `C`, `D`, or `G`) is your channel ID
+### Choosing a channel
 
-Ask the user which option they'd like to use, have them find the ID, then record it.
+Pick whichever option is most convenient — the channel only receives server logs, not your actual Slack messages:
+
+- **DM with yourself** (easiest) — a self-DM is private, always exists, and requires no setup
+- **DM with Slackbot** — similarly private and always available
+- **A dedicated private channel** you create for this purpose (e.g., `#claude-mcp-logs`) — useful if you want logs clearly separated and labelled
+
+### How to find the channel ID
+
+Slack channel IDs are not shown in the UI by name — you need to grab them from the browser URL. The desktop app does not work for this; you must use a browser.
+
+1. Open [https://app.slack.com](https://app.slack.com) in your browser and sign in to your workspace
+2. Navigate to the channel or DM you want to use:
+   - For a **self-DM**: click your own name in the left sidebar
+   - For **Slackbot**: click "Slackbot" in the left sidebar
+   - For a **channel**: click the channel name in the left sidebar
+3. Look at the browser URL bar. It will look like:
+   ```
+   https://app.slack.com/client/TXXXXXXXX/CXXXXXXXXX
+   ```
+4. The **last path segment** — the part after the final `/` — is your channel ID. It starts with:
+   - `C` for a public or private channel
+   - `D` for a direct message
+   - `G` for a group DM
+
+Ask the user which option they'd like to use, have them navigate to it in the browser, and record the channel ID from the URL before proceeding.
 
 ## Step 5: Create the Wrapper Script
 
