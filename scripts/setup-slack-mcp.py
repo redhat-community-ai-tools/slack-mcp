@@ -10,7 +10,7 @@ What this script does (automatically):
      (only manual step: log in to Slack when the browser opens)
   5. Prompts for a Slack channel ID to use for MCP server logs
   6. Writes a wrapper script that launches the MCP server
-  7. Registers the MCP server in ~/.claude/settings.json
+  7. Registers the MCP server in ~/.claude.json
 
 Usage:
   python3 setup-slack-mcp.py
@@ -33,7 +33,7 @@ INSTALL_DIR    = Path.home() / ".local" / "share" / "slack-mcp"
 VENV_DIR       = INSTALL_DIR / ".venv"
 TOKENS_FILE    = INSTALL_DIR / "tokens.env"
 WRAPPER_SCRIPT = INSTALL_DIR / "run-slack-mcp.sh"
-CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
+CLAUDE_SETTINGS = Path.home() / ".claude.json"
 
 MCP_IMAGE       = "quay.io/redhat-ai-tools/slack-mcp"
 MCP_SERVER_NAME = "slack"
@@ -175,6 +175,7 @@ channel_id = ""
 profile_dir.mkdir(parents=True, exist_ok=True)
 
 print("  Launching browser ...")
+print("  Waiting for user to log in, then fetching tokens...")
 with sync_playwright() as p:
     browser = p.chromium.launch_persistent_context(
         str(profile_dir),
@@ -209,7 +210,7 @@ with sync_playwright() as p:
         print("    - Channel:  click the channel name")
         print()
         print("    https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
-        print("                                             ^^^^^^^^^^^^ this part")
+        print("                                           ^^^^^^^^^^^^ this part")
         print("    (IDs start with C, D, or G)")
         print()
         print("  Then come back here.")
@@ -318,7 +319,10 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> str:
     print("    2. The MCP server logs its activity to a Slack channel so you can")
     print("       monitor what it's doing. Navigate to the channel or DM you want")
     print("       to use (a self-DM or Slackbot DM works great) and note the")
-    print("       channel ID from the URL")
+    print("       channel ID from the URL:")
+    print("         https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
+    print("                                                ^^^^^^^^^^^^ this part")
+    print("       (IDs start with C, D, or G)")
     print("    3. Return here — you will be prompted to enter the channel ID")
     print("       and confirm before tokens are fetched")
     print()
@@ -410,8 +414,10 @@ def register_mcp() -> None:
             print(f"  Warning: could not parse existing {CLAUDE_SETTINGS}, will overwrite.")
 
     settings.setdefault("mcpServers", {})[MCP_SERVER_NAME] = {
+        "type": "stdio",
         "command": str(WRAPPER_SCRIPT),
         "args": [],
+        "env": {},
     }
 
     CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
