@@ -73,33 +73,41 @@ python3 -m venv ~/repos/slack-token-extractor/.venv
 
 ## Step 3: Extract Slack Tokens
 
-Run the extractor — it opens a browser window:
+The extractor opens a real browser window so you can log in to Slack and let it capture your session tokens. You must run this interactively — it cannot run inside Claude Code directly.
 
-```bash
-cd ~/repos/slack-token-extractor
-.venv/bin/python playwright_extract.py
-```
+Tell the user:
 
-Log in to Slack when the browser opens, then follow the terminal prompts. Tokens are saved to `.slack_tokens.env`.
+> Open a separate terminal and run:
+>
+> ```bash
+> cd ~/repos/slack-token-extractor
+> .venv/bin/python playwright_extract.py
+> ```
+>
+> A Chromium browser window will open. Log in to Slack normally. Once you're logged in, return to the terminal and follow any prompts. When it finishes, tokens are saved to `.slack_tokens.env` in that directory.
+>
+> **Optional:** If you have multiple workspaces and want to target a specific one, pass `--workspace https://yourworkspace.slack.com`.
+>
+> After the first successful run, your browser session is persisted locally, so future token refreshes can use `--headless` without logging in again.
 
-**Optional:** pass `--workspace https://yourworkspace.slack.com` to target a specific workspace.
-
-After the first login the session is persisted, so future runs can use `--headless`.
-
-Tell the user to run this command in the Claude Code prompt box (with `!` prefix to run it in the session):
-
-> `! cd ~/repos/slack-token-extractor && .venv/bin/python playwright_extract.py`
-
-**Wait for the user to confirm the tokens were extracted before proceeding.**
+**Wait for the user to confirm the tokens were extracted successfully before proceeding.**
 
 ## Step 4: Find Your Logs Channel ID
 
-The MCP server requires a `LOGS_CHANNEL_ID` — a Slack channel where it will log activity.
+The MCP server requires a `LOGS_CHANNEL_ID` — a Slack channel where it will log its activity. It does not need to be a shared or active channel; a private channel or a DM works fine.
 
-To find a channel's ID: open Slack in a browser, navigate to the channel, and copy the ID from the URL:
-`https://app.slack.com/client/TXXXXXXXX/`**`CXXXXXXXXX`** ← this is the channel ID
+**Good options (pick one):**
+- A **DM with yourself** — open Slack in a browser, click your own name in the sidebar to open a DM with yourself
+- A **DM with Slackbot** — click Slackbot in the sidebar
+- A **private channel** you create just for this purpose (e.g., `#claude-mcp-logs`)
 
-Ask the user which channel they want to use, then record the ID.
+**To find the channel ID:**
+1. Open Slack in a browser (not the desktop app)
+2. Navigate to the channel or DM you want to use
+3. Look at the URL: `https://app.slack.com/client/TXXXXXXXX/`**`CXXXXXXXXX`**
+4. The last path segment (starts with `C`, `D`, or `G`) is your channel ID
+
+Ask the user which option they'd like to use, have them find the ID, then record it.
 
 ## Step 5: Create the Wrapper Script
 
