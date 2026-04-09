@@ -165,9 +165,12 @@ import json, os, re, sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-workspace_url = sys.argv[1]
-output_file   = sys.argv[2]
-profile_dir   = Path(sys.argv[3])
+workspace_url    = sys.argv[1]
+output_file      = sys.argv[2]
+profile_dir      = Path(sys.argv[3])
+channel_id_file  = sys.argv[4]
+
+channel_id = ""
 
 profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -197,19 +200,30 @@ with sync_playwright() as p:
         print("  " + "=" * 56)
         print("  Log in to Slack in the browser window that just opened.")
         print()
-        print("  Before pressing ENTER, find your logs channel ID:")
-        print("    1. Navigate to the channel or DM you want to use")
-        print("       - Self-DM: click your own name in the left sidebar")
-        print("       - Slackbot: click 'Slackbot' in the left sidebar")
-        print("       - Channel:  click the channel name")
-        print("    2. Copy the last segment of the URL, e.g.:")
-        print("       https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
-        print("                                              ^^^^^^^^^^^^ this part")
-        print("       (IDs start with C, D, or G)")
+        print("  While logged in, navigate to the channel you want to use")
+        print("  for MCP server logs and note the channel ID from the URL:")
+        print("    - Self-DM: click your own name in the left sidebar")
+        print("    - Slackbot: click 'Slackbot' in the left sidebar")
+        print("    - Channel:  click the channel name")
         print()
-        print("  Then come back here and press ENTER to continue.")
+        print("    https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
+        print("                                             ^^^^^^^^^^^^ this part")
+        print("    (IDs start with C, D, or G)")
+        print()
+        print("  Then come back here.")
         print("  " + "=" * 56)
-        input("  > ")
+        print()
+        while True:
+            channel_id = input("  Enter the channel ID you have selected: ").strip()
+            if channel_id[:1] in ("C", "D", "G") and len(channel_id) >= 9:
+                break
+            print("  Not a valid Slack ID (expected C/D/G followed by digits). Try again.")
+        print()
+        answer = input("  Proceed with fetching Slack tokens? [Y/n] ").strip().lower()
+        if answer not in ("", "y", "yes"):
+            print("  Aborted.")
+            browser.close()
+            sys.exit(1)
         print()
         print("  Fetching tokens... The browser window will close in about a minute.")
         try:
@@ -257,7 +271,7 @@ with sync_playwright() as p:
         browser.close()
         sys.exit(1)
 
-    print(f"  Found XOXC token: {xoxc[:20]}...{xoxc[-8:]}")
+    print("  ✓ Found XOXC token")
 
     # XOXD cookie
     xoxd = next(
@@ -271,7 +285,7 @@ with sync_playwright() as p:
         browser.close()
         sys.exit(1)
 
-    print(f"  Found XOXD token: {xoxd[:20]}...{xoxd[-8:]}")
+    print("  ✓ Found XOXD token")
     browser.close()
 
 with open(output_file, "w") as f:
@@ -282,21 +296,27 @@ with open(output_file, "w") as f:
 
 os.chmod(output_file, 0o600)
 print(f"  Tokens saved to: {output_file}")
+
+if channel_id:
+    Path(channel_id_file).write_text(channel_id)
 '''
 
 
-def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> None:
+def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> str:
     banner("Extracting Slack session tokens")
 
     if tokens_exist() and not refresh:
         print(f"  ✓ Tokens already exist at {TOKENS_FILE}")
         print("    Run with --refresh-tokens to re-extract.")
-        return
+        return ""
 
     print("  A browser window will open. Log in to Slack, then return here.")
 
     extract_file = INSTALL_DIR / "_extract_tokens.py"
     extract_file.write_text(_EXTRACT_SCRIPT)
+
+    channel_id_file = INSTALL_DIR / "channel_id.tmp"
+    channel_id_file.unlink(missing_ok=True)
 
     try:
         run([
@@ -305,6 +325,7 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> None:
             workspace_url,
             str(TOKENS_FILE),
             str(PROFILE_DIR),
+            str(channel_id_file),
         ])
     except subprocess.CalledProcessError:
         print("\n  Token extraction failed. See output above.")
@@ -312,6 +333,12 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> None:
         sys.exit(1)
     finally:
         extract_file.unlink(missing_ok=True)
+
+    if channel_id_file.exists():
+        channel_id = channel_id_file.read_text().strip()
+        channel_id_file.unlink()
+        return channel_id
+    return ""
 
 
 def write_wrapper(logs_channel: str) -> None:
@@ -385,13 +412,10 @@ def prompt_logs_channel() -> str:
 """)
 
     while True:
-        channel_id = input("  Enter channel ID (or press Enter to skip): ").strip()
-        if not channel_id:
-            print("  ⚠  No channel ID set. The server may log to stdout instead.")
-            return ""
-        if channel_id[0] in ("C", "D", "G") and len(channel_id) >= 9:
+        channel_id = input("  Enter channel ID: ").strip()
+        if channel_id[:1] in ("C", "D", "G") and len(channel_id) >= 9:
             return channel_id
-        print(f"  That doesn't look like a valid Slack ID (expected C/D/G + digits). Try again.")
+        print("  Not a valid Slack ID (expected C/D/G followed by digits). Try again.")
 
 
 def verify() -> None:
@@ -459,7 +483,7 @@ Examples:
 
     print()
     print("╔═══════════════════════════════════════════════════════════╗")
-    print("║       Slack MCP Setup for Claude Code                   ║")
+    print("║       Slack MCP Setup for Claude Code                     ║")
     print("╚═══════════════════════════════════════════════════════════╝")
     print()
     print("  One manual step required: log in to Slack when the")
@@ -468,8 +492,8 @@ Examples:
     check_prerequisites()
     python = setup_venv()
     pull_image()
-    extract_tokens(python, DEFAULT_WORKSPACE, refresh=args.refresh_tokens)
-    logs_channel = args.set_logs_channel or prompt_logs_channel()
+    channel_id_from_browser = extract_tokens(python, DEFAULT_WORKSPACE, refresh=args.refresh_tokens)
+    logs_channel = args.set_logs_channel or channel_id_from_browser or prompt_logs_channel()
     write_wrapper(logs_channel)
     register_mcp()
 
@@ -478,7 +502,7 @@ Examples:
 
     print()
     print("╔═══════════════════════════════════════════════════════════╗")
-    print("║  Setup complete!                                         ║")
+    print("║  Setup complete!                                          ║")
     print("╚═══════════════════════════════════════════════════════════╝")
     print()
     print(f"  MCP server name : {MCP_SERVER_NAME}")
