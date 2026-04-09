@@ -310,7 +310,19 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> str:
         print("    Run with --refresh-tokens to re-extract.")
         return ""
 
-    print("  A browser window will open. Log in to Slack, then return here.")
+    print("  A browser window is about to open. Before it does, read the directions below:")
+    print()
+    print("    1. Log in to your Slack workspace when the browser opens")
+    print("    2. Navigate to the channel or DM you want to use for MCP server logs")
+    print("       and note the channel ID from the URL")
+    print("    3. Return here — you will be prompted to enter the channel ID")
+    print("       and confirm before tokens are fetched")
+    print()
+    answer = input("  Continue? [Y/n] ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        print("  Aborted.")
+        sys.exit(0)
+    print()
 
     extract_file = INSTALL_DIR / "_extract_tokens.py"
     extract_file.write_text(_EXTRACT_SCRIPT)
