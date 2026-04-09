@@ -155,9 +155,15 @@ chmod +x ~/repos/slack-token-extractor/run-slack-mcp.sh
 claude mcp add -s user slack ~/repos/slack-token-extractor/run-slack-mcp.sh
 ```
 
+**After running this command, tell the user they MUST restart Claude Code before continuing.** Even if `claude mcp get slack` shows "Connected", the tools are not available until the next session. Tell the user:
+
+> The MCP server has been registered. Please fully restart Claude Code now, then come back and we'll verify it's working.
+
+**Wait for the user to confirm they have restarted before proceeding.**
+
 ## Step 7: Verify
 
-Tell the user to restart Claude Code. The `slack` MCP server should now appear in the available tools.
+The `slack` MCP server should now appear in the available tools.
 
 Suggest they test it by asking: *"What channels do I have access to in Slack?"*
 
