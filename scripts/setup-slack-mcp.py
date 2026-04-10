@@ -218,10 +218,17 @@ with sync_playwright() as p:
         while True:
             url_or_id = input("  Paste the full URL from the browser address bar: ").strip()
             # Accept a full URL or just a channel ID
+            # /client/TEAM_ID/CHANNEL_ID (app.slack.com)
             url_match = re.search(r"/client/([A-Z0-9]+)/([A-Z0-9]+)", url_or_id)
             if url_match:
                 user_team_id = url_match.group(1)
                 channel_id = url_match.group(2)
+                break
+            # /archives/CHANNEL_ID (enterprise Slack, e.g. redhat.enterprise.slack.com)
+            archives_match = re.search(r"/archives/([A-Z0-9]+)", url_or_id)
+            if archives_match:
+                channel_id = archives_match.group(1)
+                user_team_id = None
                 break
             # Fallback: bare channel ID (legacy behavior)
             bare = url_or_id.lstrip("/")
@@ -231,6 +238,7 @@ with sync_playwright() as p:
                 break
             print("  Could not parse that. Paste the full URL from the address bar, e.g.:")
             print("    https://app.slack.com/client/T01234567/D092BLQB0FR")
+            print("    https://your-org.enterprise.slack.com/archives/D092BLQB0FR")
         print()
         answer = input("  Proceed with fetching Slack tokens? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
