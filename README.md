@@ -26,6 +26,39 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 - **Knowledge Base**: AI that can search through channel history and provide context
 - **Meeting Scheduler**: AI that can read meeting requests and help coordinate schedules
 
+## Setting Up with Claude Code
+
+This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
+
+Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering a channel ID for server logs.
+
+```bash
+python3 <(curl -fsSL https://raw.githubusercontent.com/redhat-community-ai-tools/slack-mcp/main/scripts/setup-slack-mcp.py)
+```
+
+Or clone the repo first and run it locally:
+
+```bash
+git clone https://github.com/redhat-community-ai-tools/slack-mcp
+python3 slack-mcp/scripts/setup-slack-mcp.py
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--logs-channel DXXXXXXXXX` | Slack channel ID for server logs (prompted if omitted) |
+| `--workspace https://myco.slack.com` | Specific Slack workspace to open |
+| `--refresh-tokens` | Re-extract tokens when they expire (skips all other steps) |
+| `--skip-verify` | Skip the post-setup smoke test |
+
+When tokens expire, just run:
+```bash
+python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
+```
+
+---
+
 ## Running with Podman or Docker
 
 You can run the slack-mcp server in a container using Podman or Docker:

@@ -1,0 +1,11 @@
+{
+  "name": "slack-mcp",
+  "description": "Set up the redhat-community-ai-tools Slack MCP server for use with Claude Code",
+  "version": "1.0.0",
+  "author": {
+    "name": "Red Hat Community AI Tools",
+    "url": "https://github.com/redhat-community-ai-tools"
+  },
+  "homepage": "https://github.com/redhat-community-ai-tools/slack-mcp",
+  "license": "Apache-2.0"
+}
