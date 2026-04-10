@@ -210,17 +210,27 @@ with sync_playwright() as p:
         print("    - Channel:  click the channel name")
         print()
         print("    https://app.slack.com/client/TXXXXXXXX/DXXXXXXXXX")
-        print("                                           ^^^^^^^^^^^^ this part")
-        print("    (IDs start with C, D, or G)")
+        print("                                ^^^^^^^^^ team ID   ^^^^^^^^^^^ channel ID")
         print()
         print("  Then come back here.")
         print("  " + "=" * 56)
         print()
         while True:
-            channel_id = input("  Enter the channel ID you have selected: ").strip()
-            if channel_id[:1] in ("C", "D", "G") and len(channel_id) >= 9:
+            url_or_id = input("  Paste the full URL from the browser address bar: ").strip()
+            # Accept a full URL or just a channel ID
+            url_match = re.search(r"/client/([A-Z0-9]+)/([A-Z0-9]+)", url_or_id)
+            if url_match:
+                user_team_id = url_match.group(1)
+                channel_id = url_match.group(2)
                 break
-            print("  Not a valid Slack ID (expected C/D/G followed by digits). Try again.")
+            # Fallback: bare channel ID (legacy behavior)
+            bare = url_or_id.lstrip("/")
+            if bare[:1] in ("C", "D", "G") and len(bare) >= 9:
+                channel_id = bare
+                user_team_id = None
+                break
+            print("  Could not parse that. Paste the full URL from the address bar, e.g.:")
+            print("    https://app.slack.com/client/T01234567/D092BLQB0FR")
         print()
         answer = input("  Proceed with fetching Slack tokens? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
@@ -229,20 +239,55 @@ with sync_playwright() as p:
             sys.exit(1)
         print()
         print("  Fetching tokens... The browser window will close in about a minute.")
+
+        # Navigate the browser to the Slack client page so we can extract tokens
+        if user_team_id:
+            target_url = f"https://app.slack.com/client/{user_team_id}/{channel_id}"
+        else:
+            target_url = f"https://app.slack.com/client/"
+        page.goto(target_url)
         try:
-            page.wait_for_url("**/client/**", timeout=10000)
             page.wait_for_load_state("networkidle", timeout=30000)
         except PWTimeout:
             pass
+    else:
+        user_team_id = None
 
-    # Team ID
+    # Team ID — try multiple sources
     m = re.search(r"/client/([A-Z0-9]+)", page.url)
-    team_id = m.group(1) if m else page.evaluate("""() => {
-        try {
-            const c = JSON.parse(localStorage.localConfig_v2 || '{}');
-            return Object.keys(c.teams || {})[0] || null;
-        } catch { return null; }
-    }""")
+    team_id = m.group(1) if m else None
+
+    if not team_id:
+        # Try localStorage (multiple known keys)
+        team_id = page.evaluate("""() => {
+            try {
+                // Try localConfig_v2 first
+                const c = JSON.parse(localStorage.getItem('localConfig_v2') || '{}');
+                const teams = Object.keys(c.teams || {});
+                if (teams.length > 0) return teams[0];
+            } catch {}
+            try {
+                // Try redux store
+                const r = JSON.parse(localStorage.getItem('reduxStore') || '{}');
+                if (r.teams) {
+                    const teams = Object.keys(r.teams);
+                    if (teams.length > 0) return teams[0];
+                }
+            } catch {}
+            try {
+                // Scan all localStorage keys for team IDs
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const val = localStorage.getItem(key) || '';
+                    const m = val.match(/"team_id"\\s*:\\s*"(T[A-Z0-9]+)"/);
+                    if (m) return m[1];
+                }
+            } catch {}
+            return null;
+        }""")
+
+    if not team_id and user_team_id:
+        team_id = user_team_id
 
     if not team_id:
         print("  ERROR: Could not determine team ID. Is Slack fully loaded?")
