@@ -565,6 +565,62 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
 
 
 @mcp.tool()
+async def list_joined_channels(
+    exclude_archived: bool = True,
+    limit: int = 1000,
+    types: str = "public_channel,private_channel",
+) -> list[dict[str, Any]]:
+    """List channels the authenticated user is a member of.
+
+    Uses Slack's users.conversations API. By default returns public and private
+    channels only. To include DMs and group DMs, set types to e.g.
+    \"public_channel,private_channel,im,mpim\".
+    """
+    await log_to_slack(
+        f"Listing joined channels (limit: {limit}, types: {types}, exclude_archived: {exclude_archived})"
+    )
+    url = f"{SLACK_API_BASE}/users.conversations"
+    all_channels: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    while len(all_channels) < limit:
+        payload: dict[str, Any] = {
+            "types": types,
+            "limit": min(200, limit - len(all_channels)),
+            "exclude_archived": "true" if exclude_archived else "false",
+        }
+        if cursor:
+            payload["cursor"] = cursor
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+            print(f"Error listing joined channels: {error_msg}")
+            break
+
+        for ch in data.get("channels", []):
+            entry: dict[str, Any] = {
+                "id": ch.get("id", ""),
+                "name": ch.get("name", ""),
+                "is_private": ch.get("is_private", False),
+                "is_archived": ch.get("is_archived", False),
+            }
+            if ch.get("is_im"):
+                entry["is_im"] = True
+            if ch.get("is_mpim"):
+                entry["is_mpim"] = True
+            all_channels.append(entry)
+
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    print(f"Listed {len(all_channels)} joined channels")
+    return all_channels
+
+
+@mcp.tool()
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
     await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
@@ -632,6 +688,69 @@ async def search_messages(
         await get_user_handle(user_id)
 
     # Filter messages to reduce token usage (now all users are cached)
+    return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
+
+
+@mcp.tool()
+async def search_channel_messages(
+    channel_id: str,
+    query: str,
+    sort: Literal["timestamp", "score"] = "timestamp",
+    limit: int = 100,
+) -> list[dict[str, Any] | str]:
+    """Search for messages within a specific channel.
+
+    Uses Slack's search API with an 'in:<channel>' filter.
+
+    Args:
+        channel_id: The channel ID to search within.
+        query: The search query text.
+        sort: Sort results by "timestamp" (newest first) or "score" (relevance).
+        limit: Max number of results to return (default 100).
+    """
+    await log_to_slack(f"Searching in channel <#{channel_id}> for: {query} (limit: {limit})")
+    url = f"{SLACK_API_BASE}/search.messages"
+
+    all_matches = []
+    page = 1
+    scoped_query = f"in:<#{channel_id}> {query}"
+
+    while len(all_matches) < limit:
+        payload = {
+            "query": scoped_query,
+            "sort": sort,
+            "count": min(100, limit - len(all_matches)),
+            "page": page,
+        }
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+            print(f"Error searching channel messages: {error_msg}")
+            break
+
+        messages_data = data.get("messages", {})
+        matches = messages_data.get("matches", [])
+        all_matches.extend(matches)
+
+        total_pages = messages_data.get("pagination", {}).get("page_count", 1)
+        if page >= total_pages or len(matches) == 0:
+            break
+
+        page += 1
+
+    print(f"Retrieved {len(all_matches)} search results for query in channel {channel_id}")
+
+    unique_users = {msg.get("user") for msg in all_matches if msg.get("user")}
+    mention_pattern = r'<@([A-Z0-9]+)>'
+    for msg in all_matches:
+        text = msg.get("text", "")
+        if text:
+            unique_users.update(re.findall(mention_pattern, text))
+    for user_id in unique_users:
+        await get_user_handle(user_id)
+
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
 
 
