@@ -549,6 +549,26 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
+@mcp.tool()
+async def get_reactions(
+    channel_id: str, message_ts: str, full: bool = True
+) -> list[dict] | None:
+    """Get reactions to a message."""
+    await log_to_slack(
+        f"Getting reaction to message {message_ts} in channel <#{channel_id}>"
+    )
+    url = f"{SLACK_API_BASE}/reactions.get"
+    payload = {
+        "channel": channel_id,
+        "timestamp": convert_thread_ts(message_ts),
+        "full": full,
+    }
+    data = await make_request(url, method="GET", payload=payload)
+    if data and data.get("ok"):
+        message = data.get("message", {})
+        return message.get("reactions", [])
+    return None
+
 
 @mcp.tool()
 async def whoami() -> str:
