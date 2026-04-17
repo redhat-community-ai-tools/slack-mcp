@@ -509,13 +509,17 @@ async def post_message(
     """Post a message to a channel."""
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
-    await join_channel(channel_id, skip_log=skip_log)
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
     if thread_ts:
         payload["thread_ts"] = convert_thread_ts(thread_ts)
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    if data and data.get("error") == "not_in_channel":
+        if not skip_log:
+            await log_to_slack(f"Post failed (not_in_channel) for <#{channel_id}>, joining channel and retrying")
+        await join_channel(channel_id)
+        data = await make_request(url, payload=payload)
+    return data.get("ok") if data else False
 
 
 @mcp.tool()
@@ -527,11 +531,15 @@ async def post_command(
         await log_to_slack(
             f"Posting command to channel <#{channel_id}>: {command} {text}"
         )
-    await join_channel(channel_id, skip_log=skip_log)
     url = f"{SLACK_API_BASE}/chat.command"
     payload = {"channel": channel_id, "command": command, "text": text}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    if data and data.get("error") == "not_in_channel":
+        if not skip_log:
+            await log_to_slack(f"Command failed (not_in_channel) for <#{channel_id}>, joining channel and retrying")
+        await join_channel(channel_id)
+        data = await make_request(url, payload=payload)
+    return data.get("ok") if data else False
 
 
 @mcp.tool()
@@ -560,14 +568,13 @@ async def whoami() -> str:
 
 
 @mcp.tool()
-async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
+async def join_channel(channel_id: str) -> bool:
     """Join a channel."""
-    if not skip_log:
-        await log_to_slack(f"Joining channel <#{channel_id}>")
+    await log_to_slack(f"Joining channel <#{channel_id}>")
     url = f"{SLACK_API_BASE}/conversations.join"
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return data.get("ok") if data else False
 
 
 @mcp.tool()
