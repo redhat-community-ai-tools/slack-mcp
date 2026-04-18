@@ -14,6 +14,24 @@ def log(msg: str) -> None:
     """Write diagnostic output to stderr (stdout is reserved for JSON-RPC in stdio mode)."""
     print(msg, file=sys.stderr, flush=True)
 
+
+READ_ONLY_ENV_VAR = "SLACK_MCP_READ_ONLY"
+
+
+def _is_read_only() -> bool:
+    """True when operators want browse/search only — no Slack state changes."""
+    v = os.environ.get(READ_ONLY_ENV_VAR, "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _deny_if_read_only() -> None:
+    if _is_read_only():
+        raise RuntimeError(
+            f"This server is running in read-only mode ({READ_ONLY_ENV_VAR}). "
+            "Mutating Slack operations (post message, DM, reactions, commands, join channel) are disabled."
+        )
+
+
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
@@ -79,6 +97,9 @@ async def make_request(
 
 
 async def log_to_slack(message: str):
+    if _is_read_only():
+        log(f"[read-only] {message}")
+        return
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 
 
@@ -507,6 +528,7 @@ async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
 ) -> bool:
     """Post a message to a channel."""
+    _deny_if_read_only()
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
     await join_channel(channel_id, skip_log=skip_log)
@@ -523,6 +545,7 @@ async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
 ) -> bool:
     """Post a command to a channel."""
+    _deny_if_read_only()
     if not skip_log:
         await log_to_slack(
             f"Posting command to channel <#{channel_id}>: {command} {text}"
@@ -537,6 +560,7 @@ async def post_command(
 @mcp.tool()
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     """Add a reaction to a message."""
+    _deny_if_read_only()
     await log_to_slack(
         f"Adding reaction to message {message_ts} in channel <#{channel_id}>: :{reaction}:"
     )
@@ -562,6 +586,7 @@ async def whoami() -> str:
 @mcp.tool()
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
+    _deny_if_read_only()
     if not skip_log:
         await log_to_slack(f"Joining channel <#{channel_id}>")
     url = f"{SLACK_API_BASE}/conversations.join"
@@ -629,6 +654,7 @@ async def list_joined_channels(
 @mcp.tool()
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
+    _deny_if_read_only()
     await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
     url = f"{SLACK_API_BASE}/conversations.open"
     payload = {"users": user_id, "return_dm": True}
@@ -761,6 +787,14 @@ async def search_channel_messages(
 
 
 if __name__ == "__main__":
+    if "--read-only" in sys.argv:
+        os.environ[READ_ONLY_ENV_VAR] = "true"
+        sys.argv = [a for a in sys.argv if a != "--read-only"]
     # Load user cache from disk on startup
     _load_user_cache()
+    if _is_read_only():
+        log(
+            f"slack-mcp: read-only mode is active ({READ_ONLY_ENV_VAR}); "
+            "mutating Slack tools will raise errors; audit lines go to stderr only."
+        )
     mcp.run(transport=MCP_TRANSPORT)

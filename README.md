@@ -59,6 +59,19 @@ python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
 
 ---
 
+## Read-only mode
+
+For agents or automation that should **browse and search** Slack without posting, reacting, running commands, or joining channels, enable read-only mode.
+
+- **Environment variable:** set `SLACK_MCP_READ_ONLY` to a truthy value (`1`, `true`, `yes`, or `on`, case-insensitive).
+- **CLI:** pass `--read-only` when starting `slack_mcp_server.py` (equivalent to setting the variable).
+
+In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `post_command`, `add_reaction`, `join_channel`) raise a clear error. Read tools (history, search, threads, `whoami`, channel listing, cache refresh helpers, and so on) behave as usual. Tool activity that would normally be mirrored to `LOGS_CHANNEL_ID` is written to **stderr** instead so the logs channel is not written to.
+
+On startup, the server logs a line to stderr when read-only mode is active.
+
+For Podman or Docker, add `-e SLACK_MCP_READ_ONLY=true` (and the matching key in `env`) when you want the container to run read-only.
+
 ## Running with Podman or Docker
 
 You can run the slack-mcp server in a container using Podman or Docker:
