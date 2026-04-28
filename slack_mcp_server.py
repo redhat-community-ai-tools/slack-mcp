@@ -3,6 +3,7 @@ import sys
 from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 import re
 import asyncio
 from datetime import datetime, timezone
@@ -306,7 +307,7 @@ async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, 
     return messages[1:] if len(messages) > 1 else []
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_thread(
     channel_id: str,
     thread_ts: str,
@@ -348,7 +349,7 @@ async def get_thread(
     return await asyncio.gather(*[filter_message_fields(msg) for msg in messages])
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_channel_history(
     channel_id: str,
     limit: int = 1000,
@@ -474,7 +475,7 @@ async def _load_channels_to_cache() -> bool:
     return True
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_channel_id_by_name(channel_name: str) -> str:
     """Get the channel ID by channel name. The channel name can be with or without the # prefix."""
     # Remove # prefix if present
@@ -497,14 +498,14 @@ async def get_channel_id_by_name(channel_name: str) -> str:
     return ""
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_channel_cache() -> bool:
     """Refresh the channel cache. Use this when new channels are created or if channel lookups are failing."""
     await log_to_slack("Refreshing channel cache")
     return await _load_channels_to_cache()
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_user_cache() -> int:
     """Clear the user cache. Use this when user handles are outdated or if user lookups are failing. Returns the number of cached entries cleared."""
     global _user_cache
@@ -523,7 +524,7 @@ async def refresh_user_cache() -> int:
     return count
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
 ) -> bool:
@@ -540,7 +541,7 @@ async def post_message(
     return data.get("ok")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
 ) -> bool:
@@ -557,7 +558,7 @@ async def post_command(
     return data.get("ok")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     """Add a reaction to a message."""
     _deny_if_read_only()
@@ -594,7 +595,7 @@ async def get_reactions(
     return None
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def whoami() -> str:
     """Checks authentication & identity."""
     await log_to_slack("Checking authentication & identity")
@@ -603,7 +604,7 @@ async def whoami() -> str:
     return data.get("user")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
     _deny_if_read_only()
@@ -615,7 +616,7 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     return data.get("ok")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def list_joined_channels(
     exclude_archived: bool = True,
     limit: int = 1000,
@@ -671,7 +672,7 @@ async def list_joined_channels(
     return all_channels
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
     _deny_if_read_only()
@@ -684,7 +685,7 @@ async def send_dm(user_id: str, message: str) -> bool:
     return False
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_messages(
     query: str, sort: Literal["timestamp", "score"] = "timestamp", limit: int = 1000
 ) -> list[dict[str, Any] | str]:
@@ -743,7 +744,7 @@ async def search_messages(
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_channel_messages(
     channel_id: str,
     query: str,
