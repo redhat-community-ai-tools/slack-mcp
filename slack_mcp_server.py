@@ -575,7 +575,7 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_reactions(
     channel_id: str, message_ts: str, full: bool = True
 ) -> list[dict] | None:
