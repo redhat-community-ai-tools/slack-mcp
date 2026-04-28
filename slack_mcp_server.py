@@ -3,6 +3,7 @@ import sys
 from typing import Any, Literal
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 import re
 import asyncio
@@ -818,4 +819,13 @@ if __name__ == "__main__":
             f"slack-mcp: read-only mode is active ({READ_ONLY_ENV_VAR}); "
             "mutating Slack tools will raise errors; audit lines go to stderr only."
         )
+    if MCP_TRANSPORT != "stdio":
+        host = os.environ.get("FASTMCP_HOST", "0.0.0.0")
+        port = int(os.environ.get("FASTMCP_PORT", "8000"))
+        allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.settings.transport_security.allowed_hosts += [
+                h.strip() for h in allowed_hosts.split(",") if h.strip()
+        ]
     mcp.run(transport=MCP_TRANSPORT)
