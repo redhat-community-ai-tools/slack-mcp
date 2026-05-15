@@ -34,6 +34,18 @@ def _deny_if_read_only() -> None:
         )
 
 
+# Process --read-only before tool registration so write tools can be excluded
+if "--read-only" in sys.argv:
+    os.environ[READ_ONLY_ENV_VAR] = "true"
+    sys.argv = [a for a in sys.argv if a != "--read-only"]
+
+
+def _register_tool(annotations):
+    if annotations.readOnlyHint is False and _is_read_only():
+        return lambda f: f
+    return mcp.tool(annotations=annotations)
+
+
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
@@ -525,7 +537,7 @@ async def refresh_user_cache() -> int:
     return count
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_message(
     channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
 ) -> bool:
@@ -542,7 +554,7 @@ async def post_message(
     return data.get("ok")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
 ) -> bool:
@@ -559,7 +571,7 @@ async def post_command(
     return data.get("ok")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
     """Add a reaction to a message."""
     _deny_if_read_only()
@@ -605,7 +617,7 @@ async def whoami() -> str:
     return data.get("user")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     """Join a channel."""
     _deny_if_read_only()
@@ -673,7 +685,7 @@ async def list_joined_channels(
     return all_channels
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
     _deny_if_read_only()
@@ -809,15 +821,11 @@ async def search_channel_messages(
 
 
 if __name__ == "__main__":
-    if "--read-only" in sys.argv:
-        os.environ[READ_ONLY_ENV_VAR] = "true"
-        sys.argv = [a for a in sys.argv if a != "--read-only"]
-    # Load user cache from disk on startup
     _load_user_cache()
     if _is_read_only():
         log(
             f"slack-mcp: read-only mode is active ({READ_ONLY_ENV_VAR}); "
-            "mutating Slack tools will raise errors; audit lines go to stderr only."
+            "write tools are not registered; audit lines go to stderr only."
         )
     if MCP_TRANSPORT != "stdio":
         host = os.environ.get("FASTMCP_HOST", "0.0.0.0")
