@@ -36,6 +36,7 @@ def _deny_if_read_only() -> None:
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
 OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
 
@@ -55,23 +56,33 @@ mcp = FastMCP("slack")
 async def make_request(
     url: str, method: str = "POST", payload: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
-    if MCP_TRANSPORT == "stdio":
+    cookies: dict[str, str] = {}
+
+    if SLACK_BOT_TOKEN:
+        headers = {
+            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+            "Content-Type": "application/json",
+            "User-Agent": "MCP-Server/1.0",
+        }
+    elif MCP_TRANSPORT == "stdio":
         xoxc_token = os.environ["SLACK_XOXC_TOKEN"]
         xoxd_token = os.environ["SLACK_XOXD_TOKEN"]
-        user_agent = "MCP-Server/1.0"
+        headers = {
+            "Authorization": f"Bearer {xoxc_token}",
+            "Content-Type": "application/json",
+            "User-Agent": "MCP-Server/1.0",
+        }
+        cookies = {"d": xoxd_token}
     else:
         request_headers = mcp.get_context().request_context.request.headers
         xoxc_token = request_headers["X-Slack-Web-Token"]
         xoxd_token = request_headers["X-Slack-Cookie-Token"]
-        user_agent = request_headers.get("User-Agent", "MCP-Server/1.0")
-
-    headers = {
-        "Authorization": f"Bearer {xoxc_token}",
-        "Content-Type": "application/json",
-        "User-Agent": user_agent,
-    }
-
-    cookies = {"d": xoxd_token}
+        headers = {
+            "Authorization": f"Bearer {xoxc_token}",
+            "Content-Type": "application/json",
+            "User-Agent": request_headers.get("User-Agent", "MCP-Server/1.0"),
+        }
+        cookies = {"d": xoxd_token}
 
     async with httpx.AsyncClient(cookies=cookies) as client:
         try:
@@ -814,6 +825,15 @@ if __name__ == "__main__":
         sys.argv = [a for a in sys.argv if a != "--read-only"]
     # Load user cache from disk on startup
     _load_user_cache()
+    if SLACK_BOT_TOKEN:
+        if not SLACK_BOT_TOKEN.startswith("xoxb-"):
+            log("Warning: SLACK_BOT_TOKEN does not start with xoxb- — is this a valid bot token?")
+        log("slack-mcp: using bot token authentication (scoped)")
+    elif MCP_TRANSPORT == "stdio":
+        if not os.environ.get("SLACK_XOXC_TOKEN") or not os.environ.get("SLACK_XOXD_TOKEN"):
+            log("Error: stdio mode requires SLACK_XOXC_TOKEN and SLACK_XOXD_TOKEN (or SLACK_BOT_TOKEN)")
+            sys.exit(1)
+        log("slack-mcp: using browser session token authentication (full user access)")
     if _is_read_only():
         log(
             f"slack-mcp: read-only mode is active ({READ_ONLY_ENV_VAR}); "
