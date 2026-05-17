@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# slack-refresh-tokens — Refresh Slack MCP tokens from the desktop app
+#
+# Extracts xoxc/xoxd tokens directly from the Slack desktop app's local
+# storage on disk. No browser window, no DevTools, no manual copy-paste.
+#
+# Requires: Slack desktop app installed and signed in, python3,
+#           python3-cryptography, secret-tool (libsecret), curl, jq
+#
+# Usage:
+#   slack-refresh-tokens              # Auto-extract from desktop app
+#   slack-refresh-tokens --validate   # Extract and validate with Slack API
+#   slack-refresh-tokens --env        # Print tokens as env vars (for piping)
+#   slack-refresh-tokens --help
+#
+# Token storage (compatible with setup-slack-mcp.py):
+#   ~/.local/share/slack-mcp/tokens.env
+#
+# Works on Linux with GNOME Keyring. The Slack desktop app (Electron)
+# encrypts cookies using a key stored in the system keyring. This script
+# retrieves that key, decrypts the xoxd cookie, and extracts the xoxc
+# token from leveldb.
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+SLACK_DIR="${HOME}/.config/Slack"
+OUTPUT_FILE="${HOME}/.local/share/slack-mcp/tokens.env"
+VALIDATE=false
+ENV_MODE=false
+
+usage() {
+  cat <<EOF
+Usage: $SCRIPT_NAME [OPTIONS]
+
+Extract Slack session tokens from the desktop app's local storage.
+
+Options:
+  --validate    Validate tokens against Slack's auth.test API after extraction
+  --env         Print tokens as shell environment variables to stdout (no file write)
+  --output FILE Write tokens to FILE instead of the default ($OUTPUT_FILE)
+  --help        Show this help
+
+Requirements:
+  - Slack desktop app installed and signed in
+  - python3 with cryptography package (pip install cryptography)
+  - secret-tool (part of libsecret-tools / gnome-keyring)
+  - curl and jq (for --validate)
+
+EOF
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --validate)  VALIDATE=true; shift ;;
+    --env)       ENV_MODE=true; shift ;;
+    --output)    OUTPUT_FILE="$2"; shift 2 ;;
+    --help|-h)   usage ;;
+    *)           echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+# --- Preflight checks ---
+if [[ ! -d "$SLACK_DIR" ]]; then
+  echo "ERROR: Slack desktop app not found at $SLACK_DIR" >&2
+  echo "Install it from https://slack.com/downloads/linux" >&2
+  exit 1
+fi
+
+if [[ ! -f "$SLACK_DIR/Cookies" ]]; then
+  echo "ERROR: No Cookies database — is the Slack app signed in?" >&2
+  exit 1
+fi
+
+if ! command -v python3 &>/dev/null; then
+  echo "ERROR: python3 not found" >&2
+  exit 1
+fi
+
+if ! python3 -c "from cryptography.hazmat.primitives.ciphers import Cipher" 2>/dev/null; then
+  echo "ERROR: python3 cryptography package not found" >&2
+  echo "Install it: pip install cryptography" >&2
+  exit 1
+fi
+
+if ! command -v secret-tool &>/dev/null; then
+  echo "ERROR: secret-tool not found (part of libsecret-tools)" >&2
+  echo "Install it: sudo dnf install libsecret" >&2
+  exit 1
+fi
+
+# --- Extract tokens ---
+tokens=$(python3 -c "
+import sqlite3, os, hashlib, subprocess, sys
+
+slack_dir = '$SLACK_DIR'
+
+# --- xoxd: decrypt from Cookies SQLite ---
+keyring_pass = subprocess.run(
+    ['secret-tool', 'lookup', 'application', 'Slack'],
+    capture_output=True, text=True
+).stdout.strip()
+
+if not keyring_pass:
+    print('ERROR: No Slack encryption key in GNOME Keyring.', file=sys.stderr)
+    print('Is the Slack desktop app signed in?', file=sys.stderr)
+    sys.exit(1)
+
+key = hashlib.pbkdf2_hmac('sha1', keyring_pass.encode(), b'saltysalt', 1, dklen=16)
+
+conn = sqlite3.connect(os.path.join(slack_dir, 'Cookies'))
+row = conn.execute(
+    \"SELECT encrypted_value FROM cookies WHERE name = 'd' AND host_key = '.slack.com'\"
+).fetchone()
+conn.close()
+
+if not row:
+    print('ERROR: No session cookie found in Slack Cookies DB.', file=sys.stderr)
+    sys.exit(1)
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+ciphertext = row[0][3:]  # skip v10/v11 prefix
+cipher = Cipher(algorithms.AES(key), modes.CBC(b'\x00' * 16))
+dec = cipher.decryptor()
+decrypted = dec.update(ciphertext) + dec.finalize()
+pad_len = decrypted[-1]
+if 0 < pad_len <= 16:
+    decrypted = decrypted[:-pad_len]
+text = decrypted.decode('utf-8', errors='replace')
+idx = text.find('xoxd-')
+if idx < 0:
+    print('ERROR: xoxd token not found in decrypted cookie.', file=sys.stderr)
+    sys.exit(1)
+xoxd = text[idx:]
+
+# --- xoxc: scan leveldb ---
+ldb_dir = os.path.join(slack_dir, 'Local Storage', 'leveldb')
+xoxc = None
+for f in sorted(os.listdir(ldb_dir)):
+    if f.endswith('.log') or f.endswith('.ldb'):
+        try:
+            data = open(os.path.join(ldb_dir, f), 'rb').read()
+            i = data.find(b'xoxc-')
+            if i >= 0:
+                end = i
+                while end < len(data) and data[end:end+1] not in (b'\"', b' ', b'\n', b'\x00', b'\t'):
+                    end += 1
+                xoxc = data[i:end].decode('utf-8', errors='replace')
+                break
+        except Exception:
+            pass
+
+if not xoxc:
+    print('ERROR: xoxc token not found in Slack Local Storage.', file=sys.stderr)
+    sys.exit(1)
+
+print(f'SLACK_MCP_XOXC_TOKEN={xoxc}')
+print(f'SLACK_MCP_XOXD_TOKEN={xoxd}')
+" 2>/dev/null)
+
+if [[ -z "$tokens" ]]; then
+  echo "ERROR: Token extraction failed." >&2
+  exit 1
+fi
+
+xoxc=$(echo "$tokens" | grep '^SLACK_MCP_XOXC_TOKEN=' | cut -d= -f2-)
+xoxd=$(echo "$tokens" | grep '^SLACK_MCP_XOXD_TOKEN=' | cut -d= -f2-)
+
+# --- Output ---
+if [[ "$ENV_MODE" == true ]]; then
+  echo "$tokens"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+cat > "$OUTPUT_FILE" <<EOF
+# Slack session tokens (auto-generated by $SCRIPT_NAME)
+# Generated: $(date -Iseconds)
+
+SLACK_MCP_XOXC_TOKEN=${xoxc}
+SLACK_MCP_XOXD_TOKEN=${xoxd}
+EOF
+chmod 600 "$OUTPUT_FILE"
+
+echo "Tokens saved to $OUTPUT_FILE"
+echo "  xoxc: ${xoxc:0:15}...${xoxc: -8}"
+echo "  xoxd: ${xoxd:0:15}...${xoxd: -8}"
+
+# --- Validate ---
+if [[ "$VALIDATE" == true ]]; then
+  if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null; then
+    echo "WARNING: curl or jq not found — skipping validation" >&2
+    exit 0
+  fi
+  ok=$(curl -s "https://slack.com/api/auth.test" \
+    -H "Authorization: Bearer $xoxc" \
+    -b "d=$xoxd" | jq -r '.ok // false')
+  if [[ "$ok" == "true" ]]; then
+    echo "Validated: tokens are working."
+  else
+    echo "WARNING: auth.test failed — tokens may be invalid or expired." >&2
+    exit 1
+  fi
+fi
