@@ -59,6 +59,48 @@ python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
 
 ---
 
+## Bot token authentication (recommended)
+
+For better security, use a Slack App bot token (`xoxb-`) instead of browser session tokens. Bot tokens provide:
+
+- **Scoped access** — only the OAuth permissions you grant, not full user access
+- **Distinct identity** — actions appear as the bot, not as your user account
+- **Central management** — IT can audit and revoke via the Slack admin panel
+- **No browser DevTools** — tokens are generated once in the Slack App settings
+
+### Setup
+
+1. Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps)
+2. Add OAuth scopes: `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`, `reactions:read`, `reactions:write`, `search:read`, `users:read`, `commands`
+3. Install to your workspace and copy the Bot User OAuth Token (`xoxb-...`)
+4. Invite the bot to channels it needs access to
+
+### Running with a bot token
+
+Set `SLACK_BOT_TOKEN` instead of `SLACK_XOXC_TOKEN`/`SLACK_XOXD_TOKEN`:
+
+```json
+{
+  "mcpServers": {
+    "slack": {
+      "command": "podman",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "SLACK_BOT_TOKEN",
+        "-e", "LOGS_CHANNEL_ID",
+        "quay.io/redhat-ai-tools/slack-mcp"
+      ],
+      "env": {
+        "SLACK_BOT_TOKEN": "xoxb-...",
+        "LOGS_CHANNEL_ID": "C7000000"
+      }
+    }
+  }
+}
+```
+
+If both `SLACK_BOT_TOKEN` and `SLACK_XOXC_TOKEN`/`SLACK_XOXD_TOKEN` are set, the bot token takes precedence.
+
 ## Read-only mode
 
 For agents or automation that should **browse and search** Slack without posting, reacting, running commands, or joining channels, enable read-only mode.
