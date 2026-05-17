@@ -57,6 +57,26 @@ When tokens expire, just run:
 python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
 ```
 
+### Desktop App Token Refresh (Linux)
+
+If you have the [Slack desktop app](https://slack.com/downloads/linux) installed, you can refresh tokens without opening a browser:
+
+```bash
+slack-mcp/scripts/slack-refresh-tokens --validate
+```
+
+This reads tokens directly from the desktop app's local storage on disk — no DevTools, no Playwright, no manual steps. Requires the Slack app to be signed in.
+
+| Flag | Description |
+|------|-------------|
+| `--validate` | Verify tokens against Slack's API after extraction |
+| `--env` | Print tokens as env vars to stdout (for piping into other tools) |
+| `--output FILE` | Write tokens to a custom path (default: `~/.local/share/slack-mcp/tokens.env`) |
+
+**Requirements:** `python3`, `python3-cryptography`, `secret-tool` (libsecret/gnome-keyring), `curl`, `jq`
+
+This is useful for CI hooks or session startup scripts that need to silently refresh tokens before launching the MCP server.
+
 ---
 
 ## Read-only mode
