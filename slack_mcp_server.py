@@ -641,13 +641,12 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
-async def create_channel(name: str, is_private: bool = False, description: str = "") -> str | None:
+async def create_channel(name: str, is_private: bool = False) -> str | None:
     """Create a new Slack channel.
 
     Args:
         name: Channel name (will be sanitized: lowercase, hyphens, no spaces)
         is_private: Create as private channel (default: False for public)
-        description: Optional channel description/topic
 
     Returns:
         Channel ID on success, None on failure
@@ -667,8 +666,6 @@ async def create_channel(name: str, is_private: bool = False, description: str =
         "name": sanitized_name,
         "is_private": is_private
     }
-    if description:
-        payload["description"] = description
 
     data = await make_request(url, payload=payload)
 
@@ -811,7 +808,10 @@ async def send_group_dm(user_ids: list[str], message: str) -> bool:
 
     users_str = ",".join(user_ids)
     user_mentions = ", ".join([f"<@{uid}>" for uid in user_ids])
-    await log_to_slack(f"Sending group DM to {len(user_ids)} users ({user_mentions}): {message}")
+    await log_to_slack(
+        f"Sending group DM to {len(user_ids)} users ({user_mentions}) "
+        f"(message_length={len(message)})"
+    )
 
     url = f"{SLACK_API_BASE}/conversations.open"
     payload = {"users": users_str, "return_im": True}
