@@ -640,6 +640,86 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     return data.get("ok")
 
 
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def create_channel(name: str, is_private: bool = False) -> str | None:
+    """Create a new Slack channel.
+
+    Args:
+        name: Channel name (will be sanitized: lowercase, hyphens, no spaces)
+        is_private: Create as private channel (default: False for public)
+
+    Returns:
+        Channel ID on success, None on failure
+    """
+    _deny_if_read_only()
+
+    sanitized_name = name.lower()
+    sanitized_name = sanitized_name.replace(" ", "-")
+    sanitized_name = re.sub(r'[^a-z0-9\-_]', '', sanitized_name)
+    sanitized_name = sanitized_name[:80]
+
+    channel_type = "private" if is_private else "public"
+    await log_to_slack(f"Creating {channel_type} channel: {sanitized_name}")
+
+    url = f"{SLACK_API_BASE}/conversations.create"
+    payload: dict[str, Any] = {
+        "name": sanitized_name,
+        "is_private": is_private
+    }
+
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error creating channel: {error_msg}")
+        return None
+
+    channel_id = data.get("channel", {}).get("id")
+    if channel_id:
+        _channel_cache[sanitized_name] = channel_id
+        log(f"Successfully created channel {sanitized_name} (ID: {channel_id})")
+
+    return channel_id
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def invite_users_to_channel(channel_id: str, user_ids: list[str]) -> bool:
+    """Invite multiple users to a channel.
+
+    Args:
+        channel_id: Target channel ID (C...)
+        user_ids: List of user IDs to invite (U...)
+
+    Returns:
+        True if all invitations succeeded, False otherwise
+    """
+    _deny_if_read_only()
+
+    if not user_ids:
+        log("Error: user_ids list is empty")
+        return False
+
+    users_str = ",".join(user_ids)
+    user_mentions = ", ".join([f"<@{uid}>" for uid in user_ids])
+    await log_to_slack(f"Inviting {len(user_ids)} user(s) to channel <#{channel_id}>: {user_mentions}")
+
+    url = f"{SLACK_API_BASE}/conversations.invite"
+    payload = {
+        "channel": channel_id,
+        "users": users_str
+    }
+
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error inviting users to channel: {error_msg}")
+        return False
+
+    log(f"Successfully invited {len(user_ids)} user(s) to channel {channel_id}")
+    return True
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def list_joined_channels(
     exclude_archived: bool = True,
@@ -707,6 +787,47 @@ async def send_dm(user_id: str, message: str) -> bool:
     if data.get("ok"):
         return await post_message(data.get("channel").get("id"), message)
     return False
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def send_group_dm(user_ids: list[str], message: str) -> bool:
+    """Send a message to a group DM (multi-party direct message).
+
+    Args:
+        user_ids: List of 2+ user IDs to include in group DM
+        message: Message text to send
+
+    Returns:
+        True if message sent successfully, False otherwise
+    """
+    _deny_if_read_only()
+
+    if len(user_ids) < 2:
+        log("Error: group DM requires at least 2 users")
+        return False
+
+    users_str = ",".join(user_ids)
+    user_mentions = ", ".join([f"<@{uid}>" for uid in user_ids])
+    await log_to_slack(
+        f"Sending group DM to {len(user_ids)} users ({user_mentions}) "
+        f"(message_length={len(message)})"
+    )
+
+    url = f"{SLACK_API_BASE}/conversations.open"
+    payload = {"users": users_str, "return_im": True}
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error opening group DM: {error_msg}")
+        return False
+
+    channel_id = data.get("channel", {}).get("id")
+    if not channel_id:
+        log("Error: No channel ID returned from conversations.open")
+        return False
+
+    return await post_message(channel_id, message, skip_log=True)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))

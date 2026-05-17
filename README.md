@@ -91,7 +91,7 @@ For better security, use a Slack App bot token (`xoxb-`) instead of browser sess
 ### Setup
 
 1. Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps)
-2. Add OAuth scopes: `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`, `reactions:read`, `reactions:write`, `search:read`, `users:read`, `commands`
+2. Add OAuth scopes: `channels:read`, `channels:history`, `channels:manage`, `groups:read`, `groups:history`, `groups:write`, `chat:write`, `reactions:read`, `reactions:write`, `search:read`, `users:read`, `commands`, `mpim:write`
 3. Install to your workspace and copy the Bot User OAuth Token (`xoxb-...`)
 4. Invite the bot to channels it needs access to
 
