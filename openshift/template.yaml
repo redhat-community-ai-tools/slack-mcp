@@ -54,6 +54,8 @@ objects:
             value: ${FASTMCP_HOST}
           - name: LOGS_CHANNEL_ID
             value: ${LOGS_CHANNEL_ID}
+          - name: ALLOWED_HOSTS
+            value: ${MCP_HOST}
           ports:
           - containerPort: 8000
             protocol: TCP
