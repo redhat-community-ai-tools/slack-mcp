@@ -720,6 +720,52 @@ async def invite_users_to_channel(channel_id: str, user_ids: list[str]) -> bool:
     return True
 
 
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def rename_channel(channel_id: str, new_name: str) -> bool:
+    """Rename a Slack channel.
+
+    Args:
+        channel_id: Target channel ID (C...)
+        new_name: New channel name (will be sanitized: lowercase, hyphens, no spaces)
+
+    Returns:
+        True if rename succeeded, False otherwise
+    """
+    _deny_if_read_only()
+
+    sanitized_name = new_name.lower()
+    sanitized_name = sanitized_name.replace(" ", "-")
+    sanitized_name = re.sub(r'[^a-z0-9\-_]', '', sanitized_name)
+    sanitized_name = sanitized_name[:80]
+
+    await log_to_slack(f"Renaming channel <#{channel_id}> to: {sanitized_name}")
+
+    url = f"{SLACK_API_BASE}/conversations.rename"
+    payload = {
+        "channel": channel_id,
+        "name": sanitized_name
+    }
+
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error renaming channel: {error_msg}")
+        return False
+
+    channel = data.get("channel", {})
+    actual_name = channel.get("name", sanitized_name)
+    log(f"Successfully renamed channel {channel_id} to {actual_name}")
+
+    # Update channel cache with new name if we have it
+    old_names_to_remove = [k for k, v in _channel_cache.items() if v == channel_id]
+    for old_name in old_names_to_remove:
+        del _channel_cache[old_name]
+    _channel_cache[actual_name] = channel_id
+
+    return True
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def list_joined_channels(
     exclude_archived: bool = True,
