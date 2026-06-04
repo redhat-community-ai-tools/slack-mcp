@@ -822,6 +822,89 @@ async def list_joined_channels(
     return all_channels
 
 
+async def get_random_deleted_user() -> str | None:
+    """Get a random deleted user ID for clearing usergroups.
+
+    Slack API doesn't support empty usergroups, so we use a deleted user
+    as a workaround to effectively clear the usergroup.
+
+    Returns:
+        User ID of a deleted user, or None if none found
+    """
+    url = f"{SLACK_API_BASE}/users.list"
+    cursor = None
+
+    while True:
+        payload: dict[str, Any] = {"limit": 200}
+        if cursor:
+            payload["cursor"] = cursor
+
+        data = await make_request(url, method="GET", payload=payload)
+
+        if not data or not data.get("ok"):
+            log("Error fetching users list for deleted user lookup")
+            return None
+
+        for user in data.get("members", []):
+            if user.get("deleted") is True:
+                user_id = user.get("id")
+                log(f"Found deleted user: {user_id}")
+                return user_id
+
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    log("Could not find a deleted user for clearing usergroup")
+    return None
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def clear_usergroup(usergroup_id: str) -> bool:
+    """Clear all users from a Slack usergroup.
+
+    Since Slack API doesn't support empty usergroups, this uses a workaround
+    by setting the usergroup to contain only a randomly selected deleted user.
+    This effectively clears the usergroup.
+
+    Args:
+        usergroup_id: The usergroup ID (S...) to clear
+
+    Returns:
+        True if usergroup was cleared successfully, False otherwise
+    """
+    _deny_if_read_only()
+
+    await log_to_slack(f"Clearing usergroup {usergroup_id}")
+
+    # Get a deleted user to use as placeholder
+    deleted_user = await get_random_deleted_user()
+    if not deleted_user:
+        log("Failed to clear usergroup: no deleted user found")
+        return False
+
+    url = f"{SLACK_API_BASE}/usergroups.users.update"
+    payload = {
+        "usergroup": usergroup_id,
+        "users": deleted_user
+    }
+
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        # Slack can throw invalid_users error when clearing groups,
+        # but it may still clear the group successfully
+        error = data.get("error") if data else "Unknown error"
+        if error == "invalid_users":
+            log(f"Received invalid_users error but usergroup {usergroup_id} may still be cleared")
+            return True
+        log(f"Error clearing usergroup: {error}")
+        return False
+
+    log(f"Successfully cleared usergroup {usergroup_id}")
+    return True
+
+
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
