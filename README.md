@@ -4,13 +4,27 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 
 ## What is this and why should I use it?
 
-This MCP server transforms your Slack workspace into an AI-accessible environment. Instead of manually switching between your AI assistant and Slack, you can now:
+This MCP server transforms your Slack workspace into an AI-accessible environment. It provides 21+ tools for comprehensive Slack interaction:
 
-- **Read channel messages** - Get real-time updates and conversation history
-- **Post messages and commands** - Send text, files, or execute Slack commands
-- **Manage reactions** - Add emoji reactions to messages
-- **Join channels** - Automatically join new channels as needed
-- **Thread conversations** - Maintain context in threaded discussions
+**Message & Thread Operations**
+- Read channel history with date filtering and thread support
+- Post messages and replies to threads
+- Search messages across workspace or within specific channels
+- Execute Slack commands
+
+**Channel Management**
+- List, join, create, and rename channels
+- Look up channel IDs by name
+- Invite users to channels
+
+**Reactions & Users**
+- Add and view emoji reactions
+- Send direct messages and group DMs
+- Manage usergroups (clear members)
+
+**Utility**
+- Check authentication status
+- Cache management for performance
 
 ### Key Benefits
 
