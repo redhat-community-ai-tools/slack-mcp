@@ -51,6 +51,9 @@ MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
 OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
+# Required for Slack Enterprise Grid: workspace team ID (e.g. T027XXXXX).
+# Without this, conversations.create returns cannot_create_channel on org-level installs.
+SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
 
 # Cache file path (in same directory as script)
 SCRIPT_DIR = Path(__file__).parent
@@ -666,6 +669,8 @@ async def create_channel(name: str, is_private: bool = False) -> str | None:
         "name": sanitized_name,
         "is_private": is_private
     }
+    if SLACK_TEAM_ID:
+        payload["team_id"] = SLACK_TEAM_ID
 
     data = await make_request(url, payload=payload)
 
