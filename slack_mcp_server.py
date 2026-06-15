@@ -90,14 +90,22 @@ async def make_request(
         cookies = {"d": xoxd_token}
     else:
         request_headers = mcp.get_context().request_context.request.headers
-        xoxc_token = request_headers["X-Slack-Web-Token"]
-        xoxd_token = request_headers["X-Slack-Cookie-Token"]
-        headers = {
-            "Authorization": f"Bearer {xoxc_token}",
-            "Content-Type": "application/json",
-            "User-Agent": request_headers.get("User-Agent", "MCP-Server/1.0"),
-        }
-        cookies = {"d": xoxd_token}
+        # Support either bot token or user session tokens
+        if "X-Slack-Bot-Token" in request_headers:
+            bot_token = request_headers["X-Slack-Bot-Token"]
+            headers = {
+                "Authorization": f"Bearer {bot_token}",
+                "Content-Type": "application/json",
+            }
+        else:
+            xoxc_token = request_headers["X-Slack-Web-Token"]
+            xoxd_token = request_headers["X-Slack-Cookie-Token"]
+            headers = {
+                "Authorization": f"Bearer {xoxc_token}",
+                "Content-Type": "application/json",
+                "User-Agent": request_headers.get("User-Agent", "MCP-Server/1.0"),
+            }
+            cookies = {"d": xoxd_token}
 
     async with httpx.AsyncClient(cookies=cookies) as client:
         try:
