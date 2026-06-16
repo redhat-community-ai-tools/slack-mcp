@@ -48,7 +48,7 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 
 This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
 
-Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens.
+Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering an optional channel ID for server logs, if desired.
 
 ```bash
 python3 <(curl -fsSL https://raw.githubusercontent.com/redhat-community-ai-tools/slack-mcp/main/scripts/setup-slack-mcp.py)
@@ -198,7 +198,7 @@ Example configuration for running with Podman:
 By default, tool activity is written to **stderr** (visible in your terminal or process logs). To mirror activity to a Slack channel instead, set `LOGS_CHANNEL_ID` to any channel the bot or session user has access to — a self-DM or a DM with Slackbot works well for personal use.
 
 ```bash
-LOGS_CHANNEL_ID=C1234567890
+LOGS_CHANNEL_ID=C7000000
 ```
 
 In read-only mode, `LOGS_CHANNEL_ID` is ignored and all activity is always written to stderr.
