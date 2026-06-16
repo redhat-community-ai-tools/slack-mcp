@@ -7,22 +7,26 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 This MCP server transforms your Slack workspace into an AI-accessible environment. It provides 21+ tools for comprehensive Slack interaction:
 
 **Message & Thread Operations**
+
 - Read channel history with date filtering and thread support
 - Post messages and replies to threads
 - Search messages across workspace or within specific channels
 - Execute Slack commands
 
 **Channel Management**
+
 - List, join, create, and rename channels
 - Look up channel IDs by name
 - Invite users to channels
 
 **Reactions & Users**
+
 - Add and view emoji reactions
 - Send direct messages and group DMs
 - Manage usergroups (clear members)
 
 **Utility**
+
 - Check authentication status
 - Cache management for performance
 
@@ -44,7 +48,7 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 
 This repo ships as a Claude Code plugin with a guided setup skill. Claude will walk you through the entire process — no manual config editing required.
 
-Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens, and entering a channel ID for server logs.
+Run the setup script. It handles everything — venv, Playwright, token extraction, wrapper script, and Claude Code registration. The only interaction required is logging in to Slack when the browser opens.
 
 ```bash
 python3 <(curl -fsSL https://raw.githubusercontent.com/redhat-community-ai-tools/slack-mcp/main/scripts/setup-slack-mcp.py)
@@ -59,14 +63,17 @@ python3 slack-mcp/scripts/setup-slack-mcp.py
 
 **Options:**
 
-| Flag | Description |
-|------|-------------|
-| `--logs-channel DXXXXXXXXX` | Slack channel ID for server logs (prompted if omitted) |
-| `--workspace https://myco.slack.com` | Specific Slack workspace to open |
-| `--refresh-tokens` | Re-extract tokens when they expire (skips all other steps) |
-| `--skip-verify` | Skip the post-setup smoke test |
+
+| Flag                                 | Description                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `--logs-channel DXXXXXXXXX`          | Slack channel ID for server logs (optional; logs go to stderr if omitted) |
+| `--workspace https://myco.slack.com` | Specific Slack workspace to open                                          |
+| `--refresh-tokens`                   | Re-extract tokens when they expire (skips all other steps)                |
+| `--skip-verify`                      | Skip the post-setup smoke test                                            |
+
 
 When tokens expire, just run:
+
 ```bash
 python3 slack-mcp/scripts/setup-slack-mcp.py --refresh-tokens
 ```
@@ -81,11 +88,13 @@ slack-mcp/scripts/slack-refresh-tokens --validate
 
 This reads tokens directly from the desktop app's local storage on disk — no DevTools, no Playwright, no manual steps. Requires the Slack app to be signed in.
 
-| Flag | Description |
-|------|-------------|
-| `--validate` | Verify tokens against Slack's API after extraction |
-| `--env` | Print tokens as env vars to stdout (for piping into other tools) |
+
+| Flag            | Description                                                                    |
+| --------------- | ------------------------------------------------------------------------------ |
+| `--validate`    | Verify tokens against Slack's API after extraction                             |
+| `--env`         | Print tokens as env vars to stdout (for piping into other tools)               |
 | `--output FILE` | Write tokens to a custom path (default: `~/.local/share/slack-mcp/tokens.env`) |
+
 
 **Requirements:** `python3`, `python3-cryptography`, `secret-tool` (libsecret/gnome-keyring), `curl`, `jq`
 
@@ -133,6 +142,8 @@ Set `SLACK_BOT_TOKEN` instead of `SLACK_XOXC_TOKEN`/`SLACK_XOXD_TOKEN`:
 }
 ```
 
+`LOGS_CHANNEL_ID` is optional. When omitted, tool activity is written to **stderr** instead of posted to Slack.
+
 If both `SLACK_BOT_TOKEN` and `SLACK_XOXC_TOKEN`/`SLACK_XOXD_TOKEN` are set, the bot token takes precedence.
 
 ## Read-only mode
@@ -142,7 +153,7 @@ For agents or automation that should **browse and search** Slack without posting
 - **Environment variable:** set `SLACK_MCP_READ_ONLY` to a truthy value (`1`, `true`, `yes`, or `on`, case-insensitive).
 - **CLI:** pass `--read-only` when starting `slack_mcp_server.py` (equivalent to setting the variable).
 
-In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `post_command`, `add_reaction`, `join_channel`) raise a clear error. Read tools (history, search, threads, `whoami`, channel listing, cache refresh helpers, and so on) behave as usual. Tool activity that would normally be mirrored to `LOGS_CHANNEL_ID` is written to **stderr** instead so the logs channel is not written to.
+In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `post_command`, `add_reaction`, `join_channel`) raise a clear error. Read tools (history, search, threads, `whoami`, channel listing, cache refresh helpers, and so on) behave as usual. Tool activity that would normally be mirrored to `LOGS_CHANNEL_ID` is written to **stderr** instead.
 
 On startup, the server logs a line to stderr when read-only mode is active.
 
@@ -180,6 +191,18 @@ Example configuration for running with Podman:
 }
 ```
 
+`LOGS_CHANNEL_ID` is optional. When omitted, tool activity is written to **stderr** instead of posted to Slack.
+
+## Activity logging
+
+By default, tool activity is written to **stderr** (visible in your terminal or process logs). To mirror activity to a Slack channel instead, set `LOGS_CHANNEL_ID` to any channel the bot or session user has access to — a self-DM or a DM with Slackbot works well for personal use.
+
+```bash
+LOGS_CHANNEL_ID=C1234567890
+```
+
+In read-only mode, `LOGS_CHANNEL_ID` is ignored and all activity is always written to stderr.
+
 ## Running with non-stdio transport
 
 To run the server with a non-stdio transport (such as SSE), set the `MCP_TRANSPORT` environment variable to a value other than `stdio` (e.g., `sse`).
@@ -200,4 +223,4 @@ Example configuration to connect to a non-stdio MCP server:
 }
 ```
 
-Extract your Slack XOXC and XOXD tokens easily using browser extensions or Selenium automation: https://github.com/maorfr/slack-token-extractor.
+Extract your Slack XOXC and XOXD tokens easily using browser extensions or Selenium automation: [https://github.com/maorfr/slack-token-extractor](https://github.com/maorfr/slack-token-extractor).
