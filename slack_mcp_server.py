@@ -49,7 +49,7 @@ def _register_tool(annotations):
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-LOGS_CHANNEL_ID = os.environ["LOGS_CHANNEL_ID"]
+LOGS_CHANNEL_ID = os.environ.get("LOGS_CHANNEL_ID", "")
 OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
 # Required for Slack Enterprise Grid: workspace team ID (e.g. T027XXXXX).
 # Without this, conversations.create returns cannot_create_channel on org-level installs.
@@ -135,6 +135,9 @@ async def make_request(
 async def log_to_slack(message: str):
     if _is_read_only():
         log(f"[read-only] {message}")
+        return
+    if not LOGS_CHANNEL_ID:
+        log(message)
         return
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
 

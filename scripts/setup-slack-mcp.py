@@ -480,14 +480,17 @@ def register_mcp() -> None:
 
 def prompt_logs_channel() -> str:
     """Interactively guide the user to find and enter their Slack logs channel ID."""
-    banner("Slack Logs Channel ID")
+    banner("Slack Logs Channel ID (optional)")
 
-    print("""  The MCP server writes internal activity logs to a Slack channel.
+    print("""  The MCP server can mirror tool activity to a Slack channel.
   Any channel works — a self-DM or DM with Slackbot is easiest.
+  Press Enter to skip and log to stderr only.
 """)
 
     while True:
-        channel_id = input("  Enter channel ID: ").strip()
+        channel_id = input("  Enter channel ID (or press Enter to skip): ").strip()
+        if not channel_id:
+            return ""
         if channel_id[:1] in ("C", "D", "G") and len(channel_id) >= 9:
             return channel_id
         print("  Not a valid Slack ID (expected C/D/G followed by digits). Try again.")
@@ -547,7 +550,7 @@ Examples:
         "--set-logs-channel",
         default="",
         metavar="CHANNEL_ID",
-        help="Slack channel ID for MCP server log output (prompted interactively if not set)",
+        help="Slack channel ID for MCP server log output (optional; prompted interactively if not provided, press Enter to skip)",
     )
     parser.add_argument(
         "--skip-verify",
