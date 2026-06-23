@@ -237,15 +237,19 @@ def _load_reverse_user_cache() -> list[dict[str, str]]:
 
 
 def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
-    """Save the reverse user cache to disk with a timestamp."""
+    """Save the reverse user cache to disk with a timestamp.
+
+    Emails are excluded from the persisted payload to avoid storing PII on disk.
+    """
     try:
+        sanitized = [{k: v for k, v in u.items() if k != "email"} for u in users]
         data = {
             "fetched_at": datetime.now(timezone.utc).isoformat(),
-            "users": users,
+            "users": sanitized,
         }
         with open(REVERSE_USER_CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2)
-        log(f"Saved reverse user cache ({len(users)} users)")
+        log(f"Saved reverse user cache ({len(sanitized)} users)")
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
 
@@ -661,7 +665,9 @@ async def resolve_user_id(query: str) -> list[dict[str, str]]:
     if not users:
         return []
 
-    q = query.lstrip("@").lower().strip()
+    q = query.strip().lstrip("@").lower()
+    if not q:
+        return []
 
     exact_handle: list[dict[str, str]] = []
     exact_email: list[dict[str, str]] = []
