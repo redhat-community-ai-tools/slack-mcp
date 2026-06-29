@@ -58,6 +58,8 @@ SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
 # Cache file path (in same directory as script)
 SCRIPT_DIR = Path(__file__).parent
 USER_CACHE_FILE = SCRIPT_DIR / ".user_cache.json"
+REVERSE_USER_CACHE_FILE = SCRIPT_DIR / ".reverse_user_cache.json"
+REVERSE_CACHE_TTL_HOURS = 24
 
 # Cache for channel name to ID mapping
 _channel_cache: dict[str, str] = {}
@@ -213,6 +215,92 @@ def _save_user_cache() -> None:
     except Exception as e:
         log(f"Error saving user cache: {e}")
 
+
+
+
+def _load_reverse_user_cache() -> list[dict[str, str]]:
+    """Load the reverse user cache from disk. Returns empty list if stale or missing."""
+    try:
+        if REVERSE_USER_CACHE_FILE.exists():
+            with open(REVERSE_USER_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+            fetched_at = datetime.fromisoformat(data.get("fetched_at", "2000-01-01T00:00:00+00:00"))
+            age_hours = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 3600
+            if age_hours < REVERSE_CACHE_TTL_HOURS:
+                users = data.get("users", [])
+                log(f"Loaded reverse user cache ({len(users)} users, {age_hours:.1f}h old)")
+                return users
+            log(f"Reverse user cache expired ({age_hours:.1f}h old)")
+    except Exception as e:
+        log(f"Error loading reverse user cache: {e}")
+    return []
+
+
+def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
+    """Save the reverse user cache to disk with a timestamp.
+
+    Emails are excluded from the persisted payload to avoid storing PII on disk.
+    """
+    try:
+        sanitized = [{k: v for k, v in u.items() if k != "email"} for u in users]
+        data = {
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "users": sanitized,
+        }
+        with open(REVERSE_USER_CACHE_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        log(f"Saved reverse user cache ({len(sanitized)} users)")
+    except Exception as e:
+        log(f"Error saving reverse user cache: {e}")
+
+
+async def _fetch_all_users() -> list[dict[str, str]]:
+    """Fetch all workspace users via users.list with pagination. Returns simplified user records."""
+    cached = _load_reverse_user_cache()
+    if cached:
+        return cached
+
+    url = f"{SLACK_API_BASE}/users.list"
+    all_users: list[dict[str, str]] = []
+    cursor = None
+
+    while True:
+        payload: dict[str, Any] = {"limit": 200}
+        if cursor:
+            payload["cursor"] = cursor
+
+        data = await make_request(url, method="GET", payload=payload)
+        if not data or not data.get("ok"):
+            error_msg = data.get("error", "Unknown error") if data else "No response"
+            log(f"Error fetching users.list: {error_msg}")
+            break
+
+        for member in data.get("members", []):
+            if member.get("deleted") or member.get("is_bot"):
+                continue
+            profile = member.get("profile", {})
+            all_users.append({
+                "id": member.get("id", ""),
+                "handle": member.get("name", ""),
+                "real_name": member.get("real_name", ""),
+                "display_name": profile.get("display_name", ""),
+                "email": profile.get("email", ""),
+            })
+
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    if all_users:
+        _save_reverse_user_cache(all_users)
+        global _user_cache
+        for u in all_users:
+            display = u["display_name"] or u["real_name"] or u["handle"] or u["id"]
+            _user_cache[u["id"]] = display
+        _save_user_cache()
+
+    log(f"Fetched {len(all_users)} users from workspace")
+    return all_users
 
 async def get_user_handle(user_id: str) -> str:
     """Get user handle by ID with caching. Returns user_id if lookup fails."""
@@ -560,6 +648,49 @@ async def refresh_user_cache() -> int:
         log(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
 
     return count
+
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True))
+async def resolve_user_id(query: str) -> list[dict[str, str]]:
+    """Resolve a Slack user ID from a name, @handle, or email address.
+
+    Searches the full workspace member list (cached for 24h).
+    Returns up to 5 matches sorted by relevance: exact handle > exact email >
+    case-insensitive name > partial substring match.
+    Each result contains id, handle, real_name, display_name, and email.
+    """
+    await log_to_slack(f"Resolving user ID for: {query}")
+    users = await _fetch_all_users()
+    if not users:
+        return []
+
+    q = query.strip().lstrip("@").lower()
+    if not q:
+        return []
+
+    exact_handle: list[dict[str, str]] = []
+    exact_email: list[dict[str, str]] = []
+    exact_name: list[dict[str, str]] = []
+    partial: list[dict[str, str]] = []
+
+    for u in users:
+        handle = u.get("handle", "").lower()
+        email = u.get("email", "").lower()
+        real = u.get("real_name", "").lower()
+        display = u.get("display_name", "").lower()
+
+        if handle == q:
+            exact_handle.append(u)
+        elif email == q or email.split("@")[0] == q:
+            exact_email.append(u)
+        elif real == q or display == q:
+            exact_name.append(u)
+        elif q in handle or q in real or q in display or q in email:
+            partial.append(u)
+
+    results = exact_handle + exact_email + exact_name + partial
+    return results[:5]
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
