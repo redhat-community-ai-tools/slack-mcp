@@ -1,1 +1,5 @@
 .venv
+.user_cache.json
+.reverse_user_cache.json
+__pycache__/
+*.pyc
