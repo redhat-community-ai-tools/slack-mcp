@@ -598,7 +598,10 @@ async def _load_channels_to_cache() -> bool:
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            log(f"Error loading channels to cache: {error_msg}")
+            needed = data.get("needed", "") if data else ""
+            provided = data.get("provided", "") if data else ""
+            detail = f" (needed={needed}, provided={provided})" if needed else ""
+            log(f"Error loading channels to cache: {error_msg}{detail}")
             return bool(_channel_cache)
 
         for channel in data.get("channels", []):
@@ -615,6 +618,23 @@ async def _load_channels_to_cache() -> bool:
     return True
 
 
+async def _resolve_channel_via_search(channel_name: str) -> str:
+    """Resolve channel name to ID using search API when conversations.list is restricted."""
+    url = f"{SLACK_API_BASE}/search.messages"
+    payload = {"query": f"in:#{channel_name}", "count": 1}
+    data = await make_request(url, method="GET", payload=payload)
+    if data and data.get("ok"):
+        matches = data.get("messages", {}).get("matches", [])
+        if matches:
+            channel = matches[0].get("channel", {})
+            channel_id = channel.get("id", "")
+            if channel_id:
+                _channel_cache[channel_name] = channel_id
+                log(f"Resolved '{channel_name}' via search: {channel_id}")
+                return channel_id
+    return ""
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_channel_id_by_name(channel_name: str) -> str:
     """Get the channel ID by channel name. The channel name can be with or without the # prefix."""
@@ -627,12 +647,17 @@ async def get_channel_id_by_name(channel_name: str) -> str:
         log(f"Channel '{clean_name}' found in cache")
         return _channel_cache[clean_name]
 
-    # Cache miss - load all channels
+    # Cache miss - try loading all channels
     log(f"Cache miss for '{clean_name}', loading channels...")
     if await _load_channels_to_cache():
-        # Check cache again after loading
         if clean_name in _channel_cache:
             return _channel_cache[clean_name]
+
+    # Fallback: resolve via search API (works on Enterprise Grid)
+    log(f"conversations.list failed, trying search-based resolve for '{clean_name}'...")
+    channel_id = await _resolve_channel_via_search(clean_name)
+    if channel_id:
+        return channel_id
 
     log(f"Channel '{clean_name}' not found")
     return ""
@@ -975,7 +1000,9 @@ async def list_joined_channels(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            log(f"Error listing joined channels: {error_msg}")
+            needed = data.get("needed", "") if data else ""
+            detail = f" (needed={needed})" if needed else ""
+            log(f"Error listing joined channels: {error_msg}{detail}")
             break
 
         for ch in data.get("channels", []):
