@@ -11,20 +11,16 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-
 def log(msg: str) -> None:
     """Write diagnostic output to stderr (stdout is reserved for JSON-RPC in stdio mode)."""
     print(msg, file=sys.stderr, flush=True)
 
-
 READ_ONLY_ENV_VAR = "SLACK_MCP_READ_ONLY"
-
 
 def _is_read_only() -> bool:
     """True when operators want browse/search only — no Slack state changes."""
     v = os.environ.get(READ_ONLY_ENV_VAR, "").strip().lower()
     return v in ("1", "true", "yes", "on")
-
 
 def _deny_if_read_only() -> None:
     if _is_read_only():
@@ -33,18 +29,15 @@ def _deny_if_read_only() -> None:
             "Mutating Slack operations (post message, DM, reactions, commands, join channel) are disabled."
         )
 
-
 # Process --read-only before tool registration so write tools can be excluded
 if "--read-only" in sys.argv:
     os.environ[READ_ONLY_ENV_VAR] = "true"
     sys.argv = [a for a in sys.argv if a != "--read-only"]
 
-
 def _register_tool(annotations):
     if annotations.readOnlyHint is False and _is_read_only():
         return lambda f: f
     return mcp.tool(annotations=annotations)
-
 
 SLACK_API_BASE = "https://slack.com/api"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -68,7 +61,6 @@ _channel_cache: dict[str, str] = {}
 _user_cache: dict[str, str] = {}
 
 mcp = FastMCP("slack")
-
 
 async def make_request(
     url: str, method: str = "POST", payload: dict[str, Any] | None = None
@@ -133,7 +125,6 @@ async def make_request(
             log(str(e))
             return None
 
-
 async def log_to_slack(message: str):
     if _is_read_only():
         log(f"[read-only] {message}")
@@ -142,7 +133,6 @@ async def log_to_slack(message: str):
         log(message)
         return
     await post_message(LOGS_CHANNEL_ID, message, skip_log=True)
-
 
 def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
     """Convert various date formats to Slack Unix timestamp.
@@ -192,7 +182,6 @@ def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
         log(f"Error parsing date '{date_str}': {e}")
         return ""
 
-
 def _load_user_cache() -> None:
     """Load user cache from disk."""
     global _user_cache
@@ -206,7 +195,6 @@ def _load_user_cache() -> None:
         log(f"Error loading user cache: {e}")
         _user_cache = {}
 
-
 def _save_user_cache() -> None:
     """Save user cache to disk."""
     try:
@@ -214,9 +202,6 @@ def _save_user_cache() -> None:
             json.dump(_user_cache, f, indent=2)
     except Exception as e:
         log(f"Error saving user cache: {e}")
-
-
-
 
 def _load_reverse_user_cache() -> list[dict[str, str]]:
     """Load the reverse user cache from disk. Returns empty list if stale or missing."""
@@ -235,7 +220,6 @@ def _load_reverse_user_cache() -> list[dict[str, str]]:
         log(f"Error loading reverse user cache: {e}")
     return []
 
-
 def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
     """Save the reverse user cache to disk with a timestamp.
 
@@ -252,7 +236,6 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
         log(f"Saved reverse user cache ({len(sanitized)} users)")
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
-
 
 async def _fetch_all_users() -> list[dict[str, str]]:
     """Fetch all workspace users via users.list with pagination. Returns simplified user records."""
@@ -337,7 +320,6 @@ async def get_user_handle(user_id: str) -> str:
     _save_user_cache()  # Persist to disk
     return user_id
 
-
 async def replace_user_mentions(text: str) -> str:
     """Replace user ID mentions (<@USERID>) with handles (@handle)."""
     if not text:
@@ -360,7 +342,6 @@ async def replace_user_mentions(text: str) -> str:
         text = text.replace(f'<@{user_id}>', f'@{handle}')
 
     return text
-
 
 async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
     """Filter message to only essential fields to reduce token usage."""
@@ -404,7 +385,6 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
             result += f" [thread:{thread_ts}]"
         return result
 
-
 # Validate and convert thread_ts if needed
 def convert_thread_ts(ts: str) -> str:
     # If ts is already in the correct format, return as is
@@ -414,7 +394,6 @@ def convert_thread_ts(ts: str) -> str:
     if re.match(r"^\d{16}$", ts):
         return f"{ts[:10]}.{ts[10:]}"
     return ""
-
 
 async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
     """Get all replies in a thread."""
@@ -431,7 +410,6 @@ async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, 
     # Returns all messages including the parent, so we skip the first one
     messages = data.get("messages", [])
     return messages[1:] if len(messages) > 1 else []
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_thread(
@@ -457,7 +435,7 @@ async def get_thread(
     if not data or not data.get("ok"):
         error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
         log(f"Error getting thread: {error_msg}")
-        return []
+        return [f"Thread not found or error: {error_msg}"]
 
     messages = data.get("messages", [])
     log(f"Retrieved {len(messages)} messages from thread {thread_ts}")
@@ -473,7 +451,6 @@ async def get_thread(
         await get_user_handle(user_id)
 
     return await asyncio.gather(*[filter_message_fields(msg) for msg in messages])
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_channel_history(
@@ -562,7 +539,6 @@ async def get_channel_history(
     # Filter messages to reduce token usage (now all users are cached)
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_messages])
 
-
 async def _load_channels_to_cache() -> bool:
     """Load all channels into the cache with pagination. Returns True if successful."""
     global _channel_cache
@@ -600,7 +576,6 @@ async def _load_channels_to_cache() -> bool:
     log(f"Loaded {len(_channel_cache)} channels into cache")
     return True
 
-
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_channel_id_by_name(channel_name: str) -> str:
     """Get the channel ID by channel name. The channel name can be with or without the # prefix."""
@@ -621,15 +596,13 @@ async def get_channel_id_by_name(channel_name: str) -> str:
             return _channel_cache[clean_name]
 
     log(f"Channel '{clean_name}' not found")
-    return ""
-
+    return f"Channel not found: {channel_name}"
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_channel_cache() -> bool:
     """Refresh the channel cache. Use this when new channels are created or if channel lookups are failing."""
     await log_to_slack("Refreshing channel cache")
     return await _load_channels_to_cache()
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_user_cache() -> int:
@@ -649,10 +622,8 @@ async def refresh_user_cache() -> int:
 
     return count
 
-
-
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True))
-async def resolve_user_id(query: str) -> list[dict[str, str]]:
+async def resolve_user_id(query: str, max_results: int = 5) -> list[dict[str, str]]:
     """Resolve a Slack user ID from a name, @handle, or email address.
 
     Searches the full workspace member list (cached for 24h).
@@ -690,8 +661,9 @@ async def resolve_user_id(query: str) -> list[dict[str, str]]:
             partial.append(u)
 
     results = exact_handle + exact_email + exact_name + partial
-    return results[:5]
-
+    if not results:
+        return [{"id": "", "handle": "", "real_name": f"No matches found for: {query}", "display_name": ""}]
+    return results[:max_results]
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_message(
@@ -709,7 +681,6 @@ async def post_message(
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
-
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_command(
     channel_id: str, command: str, text: str, skip_log: bool = False
@@ -725,7 +696,6 @@ async def post_command(
     payload = {"channel": channel_id, "command": command, "text": text}
     data = await make_request(url, payload=payload)
     return data.get("ok")
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
@@ -760,9 +730,12 @@ async def get_reactions(
     data = await make_request(url, method="GET", payload=payload)
     if data and data.get("ok"):
         message = data.get("message", {})
-        return message.get("reactions", [])
-    return None
-
+        reactions = message.get("reactions", [])
+        if not reactions:
+            return [{"name": "none", "count": 0, "users": ["No reactions on this message"]}]
+        return reactions
+    error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+    return [{"name": "error", "count": 0, "users": [f"Could not fetch reactions: {error_msg}"]}]
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def whoami() -> str:
@@ -771,7 +744,6 @@ async def whoami() -> str:
     url = f"{SLACK_API_BASE}/auth.test"
     data = await make_request(url)
     return data.get("user")
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
@@ -783,7 +755,6 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
     return data.get("ok")
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def create_channel(name: str, is_private: bool = False) -> str | None:
@@ -828,7 +799,6 @@ async def create_channel(name: str, is_private: bool = False) -> str | None:
 
     return channel_id
 
-
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def invite_users_to_channel(channel_id: str, user_ids: list[str]) -> bool:
     """Invite multiple users to a channel.
@@ -865,7 +835,6 @@ async def invite_users_to_channel(channel_id: str, user_ids: list[str]) -> bool:
 
     log(f"Successfully invited {len(user_ids)} user(s) to channel {channel_id}")
     return True
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def rename_channel(channel_id: str, new_name: str) -> bool:
@@ -911,7 +880,6 @@ async def rename_channel(channel_id: str, new_name: str) -> bool:
     _channel_cache[actual_name] = channel_id
 
     return True
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def list_joined_channels(
@@ -968,7 +936,6 @@ async def list_joined_channels(
     print(f"Listed {len(all_channels)} joined channels")
     return all_channels
 
-
 async def get_random_deleted_user() -> str | None:
     """Get a random deleted user ID for clearing usergroups.
 
@@ -1004,7 +971,6 @@ async def get_random_deleted_user() -> str | None:
 
     log("Could not find a deleted user for clearing usergroup")
     return None
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def clear_usergroup(usergroup_id: str) -> bool:
@@ -1051,7 +1017,6 @@ async def clear_usergroup(usergroup_id: str) -> bool:
     log(f"Successfully cleared usergroup {usergroup_id}")
     return True
 
-
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_dm(user_id: str, message: str) -> bool:
     """Send a direct message to a user."""
@@ -1063,7 +1028,6 @@ async def send_dm(user_id: str, message: str) -> bool:
     if data.get("ok"):
         return await post_message(data.get("channel").get("id"), message)
     return False
-
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_group_dm(user_ids: list[str], message: str) -> bool:
@@ -1104,7 +1068,6 @@ async def send_group_dm(user_ids: list[str], message: str) -> bool:
         return False
 
     return await post_message(channel_id, message, skip_log=True)
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_messages(
@@ -1163,7 +1126,6 @@ async def search_messages(
 
     # Filter messages to reduce token usage (now all users are cached)
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_channel_messages(
@@ -1226,7 +1188,6 @@ async def search_channel_messages(
         await get_user_handle(user_id)
 
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
-
 
 if __name__ == "__main__":
     _load_user_cache()
