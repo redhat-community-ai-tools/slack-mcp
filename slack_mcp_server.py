@@ -237,15 +237,16 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
 
-async def _fetch_all_users() -> list[dict[str, str]]:
+async def _fetch_all_users(require_email: bool = False) -> list[dict[str, str]]:
     """Fetch all workspace users via users.list with pagination. Returns simplified user records."""
     cached = _load_reverse_user_cache()
-    if cached:
+    if cached and not require_email:
         return cached
 
     url = f"{SLACK_API_BASE}/users.list"
     all_users: list[dict[str, str]] = []
     cursor = None
+    completed = False
 
     while True:
         payload: dict[str, Any] = {"limit": 200}
@@ -256,7 +257,7 @@ async def _fetch_all_users() -> list[dict[str, str]]:
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response"
             log(f"Error fetching users.list: {error_msg}")
-            break
+            return []
 
         for member in data.get("members", []):
             if member.get("deleted") or member.get("is_bot"):
@@ -272,9 +273,10 @@ async def _fetch_all_users() -> list[dict[str, str]]:
 
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
+            completed = True
             break
 
-    if all_users:
+    if completed and all_users:
         _save_reverse_user_cache(all_users)
         global _user_cache
         for u in all_users:
@@ -632,13 +634,13 @@ async def resolve_user_id(query: str, max_results: int = 5) -> list[dict[str, st
     Each result contains id, handle, real_name, display_name, and email.
     """
     await log_to_slack(f"Resolving user ID for: {query}")
-    users = await _fetch_all_users()
-    if not users:
-        return []
-
     q = query.strip().lstrip("@").lower()
     if not q:
-        return []
+        return [{"id": "", "handle": "", "real_name": "No query provided", "display_name": ""}]
+
+    users = await _fetch_all_users(require_email="@" in q)
+    if not users:
+        return [{"id": "", "handle": "", "real_name": "Could not load workspace users", "display_name": ""}]
 
     exact_handle: list[dict[str, str]] = []
     exact_email: list[dict[str, str]] = []
