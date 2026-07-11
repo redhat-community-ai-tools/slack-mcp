@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from typing import Any, Literal
@@ -11,10 +12,10 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from logging_config import configure_logging
 
-def log(msg: str) -> None:
-    """Write diagnostic output to stderr (stdout is reserved for JSON-RPC in stdio mode)."""
-    print(msg, file=sys.stderr, flush=True)
+configure_logging()
+logger = logging.getLogger("slack-mcp")
 
 
 READ_ONLY_ENV_VAR = "SLACK_MCP_READ_ONLY"
@@ -144,13 +145,13 @@ async def make_request(
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            log(str(e))
+            logger.error("Slack API request failed: %s", e)
             return None
 
 
 async def log_to_slack(message: str):
     if _is_read_only():
-        log(f"[read-only] {message}")
+        logger.info("[read-only] %s", message)
         return
     if not LOGS_CHANNEL_ID:
         log(message)
@@ -203,7 +204,7 @@ def parse_timestamp(date_str: str, is_end_of_range: bool = False) -> str:
         # Convert to Unix timestamp with microsecond precision
         return f"{dt.timestamp():.6f}"
     except ValueError as e:
-        log(f"Error parsing date '{date_str}': {e}")
+        logger.error("Error parsing date '%s': %s", date_str, e)
         return ""
 
 
@@ -215,9 +216,9 @@ def _load_user_cache() -> None:
         if USER_CACHE_FILE.exists():
             with open(USER_CACHE_FILE, 'r') as f:
                 _user_cache = json.load(f)
-            log(f"Loaded {len(_user_cache)} user handles from cache")
+            logger.info("Loaded %d user handles from cache", len(_user_cache))
     except Exception as e:
-        log(f"Error loading user cache: {e}")
+        logger.error("Error loading user cache: %s", e)
         _user_cache = {}
 
 
@@ -227,7 +228,7 @@ def _save_user_cache() -> None:
         with open(USER_CACHE_FILE, 'w') as f:
             json.dump(_user_cache, f, indent=2)
     except Exception as e:
-        log(f"Error saving user cache: {e}")
+        logger.error("Error saving user cache: %s", e)
 
 
 
@@ -439,7 +440,7 @@ async def get_thread_replies(channel_id: str, thread_ts: str) -> list[dict[str, 
 
     if not data or not data.get("ok"):
         error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-        log(f"Error getting thread replies: {error_msg}")
+        logger.error("Error getting thread replies: %s", error_msg)
         return []
 
     # Returns all messages including the parent, so we skip the first one
@@ -470,11 +471,11 @@ async def get_thread(
 
     if not data or not data.get("ok"):
         error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-        log(f"Error getting thread: {error_msg}")
+        logger.error("Error getting thread: %s", error_msg)
         return []
 
     messages = data.get("messages", [])
-    log(f"Retrieved {len(messages)} messages from thread {thread_ts}")
+    logger.info("Retrieved %d messages from thread %s", len(messages), thread_ts)
 
     # Pre-fetch all unique user handles
     unique_users = {msg.get("user") for msg in messages if msg.get("user")}
@@ -529,7 +530,7 @@ async def get_channel_history(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            log(f"Error getting channel history: {error_msg}")
+            logger.error("Error getting channel history: %s", error_msg)
             break
 
         messages = data.get("messages", [])
@@ -540,7 +541,7 @@ async def get_channel_history(
         if not cursor:
             break
 
-    log(f"Retrieved {len(all_messages)} messages from channel {channel_id}")
+    logger.info("Retrieved %d messages from channel %s", len(all_messages), channel_id)
 
     # Fetch thread replies if requested
     if include_threads:
@@ -555,7 +556,7 @@ async def get_channel_history(
                     thread_messages.extend(replies)
 
         all_messages.extend(thread_messages)
-        log(f"Retrieved {len(thread_messages)} additional messages from threads")
+        logger.info("Retrieved %d additional messages from threads", len(thread_messages))
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
     # Include both message authors and users mentioned in text
@@ -601,7 +602,7 @@ async def _load_channels_to_cache() -> bool:
             needed = data.get("needed", "") if data else ""
             provided = data.get("provided", "") if data else ""
             detail = f" (needed={needed}, provided={provided})" if needed else ""
-            log(f"Error loading channels to cache: {error_msg}{detail}")
+            logger.error("Error loading channels to cache: %s%s", error_msg, detail)
             return bool(_channel_cache)
 
         for channel in data.get("channels", []):
@@ -614,7 +615,7 @@ async def _load_channels_to_cache() -> bool:
         if not cursor:
             break
 
-    log(f"Loaded {len(_channel_cache)} channels into cache")
+    logger.info("Loaded %d channels into cache", len(_channel_cache))
     return True
 
 
@@ -630,7 +631,7 @@ async def _resolve_channel_via_search(channel_name: str) -> str:
             channel_id = channel.get("id", "")
             if channel_id:
                 _channel_cache[channel_name] = channel_id
-                log(f"Resolved '{channel_name}' via search: {channel_id}")
+                logger.info("Resolved '%s' via search: %s", channel_name, channel_id)
                 return channel_id
     return ""
 
@@ -644,22 +645,22 @@ async def get_channel_id_by_name(channel_name: str) -> str:
 
     # Check cache first
     if clean_name in _channel_cache:
-        log(f"Channel '{clean_name}' found in cache")
+        logger.debug("Channel '%s' found in cache", clean_name)
         return _channel_cache[clean_name]
 
     # Cache miss - try loading all channels
-    log(f"Cache miss for '{clean_name}', loading channels...")
+    logger.debug("Cache miss for '%s', loading channels...", clean_name)
     if await _load_channels_to_cache():
         if clean_name in _channel_cache:
             return _channel_cache[clean_name]
 
     # Fallback: resolve via search API (works on Enterprise Grid)
-    log(f"conversations.list failed, trying search-based resolve for '{clean_name}'...")
+    logger.debug("conversations.list failed, trying search-based resolve for '%s'...", clean_name)
     channel_id = await _resolve_channel_via_search(clean_name)
     if channel_id:
         return channel_id
 
-    log(f"Channel '{clean_name}' not found")
+    logger.warning("Channel '%s' not found", clean_name)
     return ""
 
 
@@ -682,9 +683,9 @@ async def refresh_user_cache() -> int:
     try:
         if USER_CACHE_FILE.exists():
             USER_CACHE_FILE.unlink()
-            log(f"Cleared {count} user cache entries and deleted cache file")
+            logger.info("Cleared %d user cache entries and deleted cache file", count)
     except Exception as e:
-        log(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
+        logger.warning("Cleared %d user cache entries but failed to delete cache file: %s", count, e)
 
     return count
 
@@ -1002,7 +1003,7 @@ async def list_joined_channels(
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
             needed = data.get("needed", "") if data else ""
             detail = f" (needed={needed})" if needed else ""
-            log(f"Error listing joined channels: {error_msg}{detail}")
+            logger.error("Error listing joined channels: %s%s", error_msg, detail)
             break
 
         for ch in data.get("channels", []):
@@ -1022,7 +1023,7 @@ async def list_joined_channels(
         if not cursor:
             break
 
-    log(f"Listed {len(all_channels)} joined channels")
+    logger.info("Listed %d joined channels", len(all_channels))
     return all_channels
 
 
@@ -1212,7 +1213,7 @@ async def search_messages(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            log(f"Error searching messages: {error_msg}")
+            logger.error("Error searching messages: %s", error_msg)
             break
 
         messages_data = data.get("messages", {})
@@ -1226,7 +1227,7 @@ async def search_messages(
 
         page += 1
 
-    log(f"Retrieved {len(all_matches)} search results for query: {query}")
+    logger.info("Retrieved %d search results for query: %s", len(all_matches), query)
 
     # Pre-fetch all unique user handles to avoid duplicate API calls
     # Include both message authors and users mentioned in text
@@ -1284,7 +1285,7 @@ async def search_channel_messages(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            log(f"Error searching channel messages: {error_msg}")
+            logger.error("Error searching channel messages: %s", error_msg)
             break
 
         messages_data = data.get("messages", {})
@@ -1297,7 +1298,7 @@ async def search_channel_messages(
 
         page += 1
 
-    log(f"Retrieved {len(all_matches)} search results for query in channel {channel_id}")
+    logger.info("Retrieved %d search results for query in channel %s", len(all_matches), channel_id)
 
     unique_users = {msg.get("user") for msg in all_matches if msg.get("user")}
     mention_pattern = r'<@([A-Z0-9]+)>'
@@ -1333,8 +1334,8 @@ if __name__ == "__main__":
         host = os.environ.get("FASTMCP_HOST", "127.0.0.1")
         port = int(os.environ.get("FASTMCP_PORT", "8000"))
         if host == "0.0.0.0":  # nosemgrep: mcp-bind-all-interfaces
-            log("WARNING: binding to 0.0.0.0 exposes this server to the network. "
-                "Use 127.0.0.1 unless running inside a container.")
+            logger.warning("Binding to 0.0.0.0 exposes this server to the network. "
+                           "Use 127.0.0.1 unless running inside a container.")
         allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
         mcp.settings.host = host
         mcp.settings.port = port
