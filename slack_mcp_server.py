@@ -1332,7 +1332,7 @@ if __name__ == "__main__":
     if MCP_TRANSPORT != "stdio":
         host = os.environ.get("FASTMCP_HOST", "127.0.0.1")
         port = int(os.environ.get("FASTMCP_PORT", "8000"))
-        if host == "0.0.0.0":
+        if host == "0.0.0.0":  # nosemgrep: mcp-bind-all-interfaces
             log("WARNING: binding to 0.0.0.0 exposes this server to the network. "
                 "Use 127.0.0.1 unless running inside a container.")
         allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
