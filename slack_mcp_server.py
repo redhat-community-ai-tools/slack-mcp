@@ -945,7 +945,7 @@ async def list_joined_channels(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            print(f"Error listing joined channels: {error_msg}")
+            log(f"Error listing joined channels: {error_msg}")
             break
 
         for ch in data.get("channels", []):
@@ -965,7 +965,7 @@ async def list_joined_channels(
         if not cursor:
             break
 
-    print(f"Listed {len(all_channels)} joined channels")
+    log(f"Listed {len(all_channels)} joined channels")
     return all_channels
 
 
@@ -1201,7 +1201,7 @@ async def search_channel_messages(
 
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
-            print(f"Error searching channel messages: {error_msg}")
+            log(f"Error searching channel messages: {error_msg}")
             break
 
         messages_data = data.get("messages", {})
@@ -1214,7 +1214,7 @@ async def search_channel_messages(
 
         page += 1
 
-    print(f"Retrieved {len(all_matches)} search results for query in channel {channel_id}")
+    log(f"Retrieved {len(all_matches)} search results for query in channel {channel_id}")
 
     unique_users = {msg.get("user") for msg in all_matches if msg.get("user")}
     mention_pattern = r'<@([A-Z0-9]+)>'
