@@ -78,7 +78,7 @@ if [[ -z "$SLACK_DIR" || ! -d "$SLACK_DIR" ]]; then
   exit 1
 fi
 
-echo "Using Slack data directory: $SLACK_DIR"
+echo "Using Slack data directory: $SLACK_DIR" >&2
 
 if [[ ! -f "$SLACK_DIR/Cookies" ]]; then
   echo "ERROR: No Cookies database — is the Slack app signed in?" >&2
