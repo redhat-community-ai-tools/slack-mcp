@@ -977,7 +977,13 @@ async def send_dm(
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
-async def send_group_dm(user_ids: list[str], message: str) -> bool:
+async def send_group_dm(
+    user_ids: list[str],
+    message: str,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+    blocks: str = "",
+) -> bool:
     """Send a message to a group DM (multi-party direct message).
 
     Args:
@@ -1014,7 +1020,14 @@ async def send_group_dm(user_ids: list[str], message: str) -> bool:
         log("Error: No channel ID returned from conversations.open")
         return False
 
-    return await post_message(channel_id, message, skip_log=True)
+    return await post_message(
+        channel_id,
+        message,
+        skip_log=True,
+        unfurl_links=unfurl_links,
+        unfurl_media=unfurl_media,
+        blocks=blocks,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
