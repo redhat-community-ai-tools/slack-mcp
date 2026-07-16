@@ -23,27 +23,36 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-SLACK_DIR="${HOME}/.config/Slack"
 OUTPUT_FILE="${HOME}/.local/share/slack-mcp/tokens.env"
 VALIDATE=false
 ENV_MODE=false
+
+# Auto-detect Slack installation: Flatpak or native
+if [[ -d "${HOME}/.var/app/com.slack.Slack/config/Slack" ]]; then
+  SLACK_DIR="${HOME}/.var/app/com.slack.Slack/config/Slack"
+elif [[ -d "${HOME}/.config/Slack" ]]; then
+  SLACK_DIR="${HOME}/.config/Slack"
+else
+  SLACK_DIR=""
+fi
 
 usage() {
   cat <<EOF
 Usage: $SCRIPT_NAME [OPTIONS]
 
 Extract Slack session tokens from the desktop app's local storage.
+Supports both native and Flatpak installations (auto-detected).
 
 Options:
   --validate    Validate tokens against Slack's auth.test API after extraction
   --env         Print tokens as shell environment variables to stdout (no file write)
   --output FILE Write tokens to FILE instead of the default ($OUTPUT_FILE)
+  --slack-dir D Override auto-detected Slack data directory
   --help        Show this help
 
 Requirements:
   - Slack desktop app installed and signed in
-  - python3 with cryptography package (pip install cryptography)
-  - secret-tool (part of libsecret-tools / gnome-keyring)
+  - python3 with cryptography and secretstorage packages
   - curl and jq (for --validate)
 
 EOF
@@ -55,17 +64,21 @@ while [[ $# -gt 0 ]]; do
     --validate)  VALIDATE=true; shift ;;
     --env)       ENV_MODE=true; shift ;;
     --output)    OUTPUT_FILE="$2"; shift 2 ;;
+    --slack-dir) SLACK_DIR="$2"; shift 2 ;;
     --help|-h)   usage ;;
     *)           echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
 # --- Preflight checks ---
-if [[ ! -d "$SLACK_DIR" ]]; then
-  echo "ERROR: Slack desktop app not found at $SLACK_DIR" >&2
-  echo "Install it from https://slack.com/downloads/linux" >&2
+if [[ -z "$SLACK_DIR" || ! -d "$SLACK_DIR" ]]; then
+  echo "ERROR: Slack desktop app not found." >&2
+  echo "Checked: ~/.config/Slack (native) and ~/.var/app/com.slack.Slack/config/Slack (Flatpak)" >&2
+  echo "Install Slack or use --slack-dir to specify the location." >&2
   exit 1
 fi
+
+echo "Using Slack data directory: $SLACK_DIR"
 
 if [[ ! -f "$SLACK_DIR/Cookies" ]]; then
   echo "ERROR: No Cookies database — is the Slack app signed in?" >&2
@@ -83,29 +96,42 @@ if ! python3 -c "from cryptography.hazmat.primitives.ciphers import Cipher" 2>/d
   exit 1
 fi
 
-if ! command -v secret-tool &>/dev/null; then
-  echo "ERROR: secret-tool not found (part of libsecret-tools)" >&2
-  echo "Install it: sudo dnf install libsecret" >&2
+if ! python3 -c "import secretstorage" 2>/dev/null; then
+  echo "ERROR: python3 secretstorage package not found" >&2
+  echo "Install it: pip install secretstorage" >&2
   exit 1
 fi
 
 # --- Extract tokens ---
 tokens=$(python3 -c "
-import sqlite3, os, hashlib, subprocess, sys
+import sqlite3, os, hashlib, sys
+import secretstorage
 
 slack_dir = '$SLACK_DIR'
 
-# --- xoxd: decrypt from Cookies SQLite ---
-keyring_pass = subprocess.run(
-    ['secret-tool', 'lookup', 'application', 'Slack'],
-    capture_output=True, text=True
-).stdout.strip()
+# --- Get encryption key from system keyring ---
+# Supports both native ('application'='Slack') and Flatpak
+# ('server'='Slack Keys', 'user'='Slack Safe Storage') keyring entries.
+bus = secretstorage.dbus_init()
+keyring_pass = None
+for coll in secretstorage.get_all_collections(bus):
+    for item in coll.get_all_items():
+        attrs = item.get_attributes()
+        if attrs.get('application') == 'Slack':
+            keyring_pass = item.get_secret().decode()
+            break
+        if attrs.get('user') == 'Slack Safe Storage' and attrs.get('server') == 'Slack Keys':
+            keyring_pass = item.get_secret().decode()
+            break
+    if keyring_pass:
+        break
 
 if not keyring_pass:
-    print('ERROR: No Slack encryption key in GNOME Keyring.', file=sys.stderr)
+    print('ERROR: No Slack encryption key in system keyring.', file=sys.stderr)
     print('Is the Slack desktop app signed in?', file=sys.stderr)
     sys.exit(1)
 
+# --- xoxd: decrypt from Cookies SQLite ---
 key = hashlib.pbkdf2_hmac('sha1', keyring_pass.encode(), b'saltysalt', 1, dklen=16)
 
 conn = sqlite3.connect(os.path.join(slack_dir, 'Cookies'))
@@ -133,22 +159,26 @@ if idx < 0:
     sys.exit(1)
 xoxd = text[idx:]
 
-# --- xoxc: scan leveldb ---
+# --- xoxc: scan leveldb (newest files first for freshest token) ---
 ldb_dir = os.path.join(slack_dir, 'Local Storage', 'leveldb')
 xoxc = None
-for f in sorted(os.listdir(ldb_dir)):
-    if f.endswith('.log') or f.endswith('.ldb'):
-        try:
-            data = open(os.path.join(ldb_dir, f), 'rb').read()
-            i = data.find(b'xoxc-')
-            if i >= 0:
-                end = i
-                while end < len(data) and data[end:end+1] not in (b'\"', b' ', b'\n', b'\x00', b'\t'):
-                    end += 1
-                xoxc = data[i:end].decode('utf-8', errors='replace')
-                break
-        except Exception:
-            pass
+files = sorted(
+    [f for f in os.listdir(ldb_dir) if f.endswith('.log') or f.endswith('.ldb')],
+    key=lambda f: os.path.getmtime(os.path.join(ldb_dir, f)),
+    reverse=True
+)
+for f in files:
+    try:
+        data = open(os.path.join(ldb_dir, f), 'rb').read()
+        i = data.find(b'xoxc-')
+        if i >= 0:
+            end = i
+            while end < len(data) and data[end:end+1] not in (b'\"', b' ', b'\n', b'\x00', b'\t'):
+                end += 1
+            xoxc = data[i:end].decode('utf-8', errors='replace')
+            break
+    except Exception:
+        pass
 
 if not xoxc:
     print('ERROR: xoxc token not found in Slack Local Storage.', file=sys.stderr)
