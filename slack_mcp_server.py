@@ -68,6 +68,19 @@ _user_cache: dict[str, str] = {}
 mcp = FastMCP("slack")
 
 
+def _get_session_tokens_from_env() -> tuple[str, str] | None:
+    """Return (xoxc, xoxd) from environment if both are set, else None.
+
+    Accepts either SLACK_XOXC_TOKEN / SLACK_XOXD_TOKEN or their
+    SLACK_MCP_* variants (the token file written by slack-refresh-tokens).
+    """
+    xoxc = os.environ.get("SLACK_XOXC_TOKEN") or os.environ.get("SLACK_MCP_XOXC_TOKEN", "")
+    xoxd = os.environ.get("SLACK_XOXD_TOKEN") or os.environ.get("SLACK_MCP_XOXD_TOKEN", "")
+    if xoxc and xoxd:
+        return xoxc, xoxd
+    return None
+
+
 async def make_request(
     url: str, method: str = "POST", payload: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
@@ -79,18 +92,16 @@ async def make_request(
             "Content-Type": "application/json",
             "User-Agent": "MCP-Server/1.0",
         }
-    elif MCP_TRANSPORT == "stdio":
-        xoxc_token = os.environ["SLACK_XOXC_TOKEN"]
-        xoxd_token = os.environ["SLACK_XOXD_TOKEN"]
+    elif (env_tokens := _get_session_tokens_from_env()):
+        xoxc_token, xoxd_token = env_tokens
         headers = {
             "Authorization": f"Bearer {xoxc_token}",
             "Content-Type": "application/json",
             "User-Agent": "MCP-Server/1.0",
         }
         cookies = {"d": xoxd_token}
-    else:
+    elif MCP_TRANSPORT != "stdio":
         request_headers = mcp.get_context().request_context.request.headers
-        # Support either bot token or user session tokens
         if "X-Slack-Bot-Token" in request_headers:
             bot_token = request_headers["X-Slack-Bot-Token"]
             headers = {
@@ -106,6 +117,9 @@ async def make_request(
                 "User-Agent": request_headers.get("User-Agent", "MCP-Server/1.0"),
             }
             cookies = {"d": xoxd_token}
+    else:
+        log("Error: stdio mode requires SLACK_XOXC_TOKEN and SLACK_XOXD_TOKEN (or SLACK_BOT_TOKEN)")
+        return None
 
     async with httpx.AsyncClient(cookies=cookies) as client:
         try:
@@ -564,17 +578,29 @@ async def refresh_user_cache() -> int:
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_message(
-    channel_id: str, message: str, thread_ts: str = "", skip_log: bool = False
+    channel_id: str,
+    message: str,
+    thread_ts: str = "",
+    skip_log: bool = False,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+    blocks: str = "",
 ) -> bool:
-    """Post a message to a channel."""
+    """Post a message to a channel. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback."""
     _deny_if_read_only()
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
     await join_channel(channel_id, skip_log=skip_log)
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
+    if blocks:
+        payload["blocks"] = json.loads(blocks)
     if thread_ts:
         payload["thread_ts"] = convert_thread_ts(thread_ts)
+    if not unfurl_links:
+        payload["unfurl_links"] = False
+    if not unfurl_media:
+        payload["unfurl_media"] = False
     data = await make_request(url, payload=payload)
     return data.get("ok")
 
@@ -922,15 +948,27 @@ async def clear_usergroup(usergroup_id: str) -> bool:
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
-async def send_dm(user_id: str, message: str) -> bool:
-    """Send a direct message to a user."""
+async def send_dm(
+    user_id: str,
+    message: str,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+    blocks: str = "",
+) -> bool:
+    """Send a direct message to a user. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback."""
     _deny_if_read_only()
     await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
     url = f"{SLACK_API_BASE}/conversations.open"
     payload = {"users": user_id, "return_dm": True}
     data = await make_request(url, payload=payload)
     if data.get("ok"):
-        return await post_message(data.get("channel").get("id"), message)
+        return await post_message(
+            data.get("channel").get("id"),
+            message,
+            unfurl_links=unfurl_links,
+            unfurl_media=unfurl_media,
+            blocks=blocks,
+        )
     return False
 
 
@@ -1103,11 +1141,13 @@ if __name__ == "__main__":
         if not SLACK_BOT_TOKEN.startswith("xoxb-"):
             log("Warning: SLACK_BOT_TOKEN does not start with xoxb- — is this a valid bot token?")
         log("slack-mcp: using bot token authentication (scoped)")
-    elif MCP_TRANSPORT == "stdio":
-        if not os.environ.get("SLACK_XOXC_TOKEN") or not os.environ.get("SLACK_XOXD_TOKEN"):
-            log("Error: stdio mode requires SLACK_XOXC_TOKEN and SLACK_XOXD_TOKEN (or SLACK_BOT_TOKEN)")
-            sys.exit(1)
+    elif _get_session_tokens_from_env():
         log("slack-mcp: using browser session token authentication (full user access)")
+    elif MCP_TRANSPORT == "stdio":
+        log("Error: stdio mode requires SLACK_XOXC_TOKEN and SLACK_XOXD_TOKEN (or SLACK_BOT_TOKEN)")
+        sys.exit(1)
+    else:
+        log("slack-mcp: no server-side tokens — expecting per-request auth headers")
     if _is_read_only():
         log(
             f"slack-mcp: read-only mode is active ({READ_ONLY_ENV_VAR}); "
