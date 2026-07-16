@@ -1098,8 +1098,9 @@ async def send_dm(
     data = await make_request(url, payload=payload)
     if data and data.get("ok"):
         return await post_message(
-            data.get("channel").get("id"),
+            data.get("channel", {}).get("id"),
             message,
+            skip_log=True,
             unfurl_links=unfurl_links,
             unfurl_media=unfurl_media,
             blocks=blocks,
