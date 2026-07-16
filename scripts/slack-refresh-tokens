@@ -168,9 +168,15 @@ xoxd = text[idx:]
 # --- xoxc: scan leveldb (newest files first for freshest token) ---
 ldb_dir = os.path.join(slack_dir, 'Local Storage', 'leveldb')
 xoxc = None
+def _mtime(f):
+    try:
+        return os.path.getmtime(os.path.join(ldb_dir, f))
+    except OSError:
+        return -1
+
 files = sorted(
     [f for f in os.listdir(ldb_dir) if f.endswith('.log') or f.endswith('.ldb')],
-    key=lambda f: os.path.getmtime(os.path.join(ldb_dir, f)),
+    key=_mtime,
     reverse=True
 )
 for f in files:
