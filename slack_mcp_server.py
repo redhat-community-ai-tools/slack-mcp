@@ -606,7 +606,7 @@ async def post_message(
     if not unfurl_media:
         payload["unfurl_media"] = False
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
@@ -623,7 +623,7 @@ async def post_command(
     url = f"{SLACK_API_BASE}/chat.command"
     payload = {"channel": channel_id, "command": command, "text": text}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
@@ -640,7 +640,7 @@ async def add_reaction(channel_id: str, message_ts: str, reaction: str) -> bool:
         "timestamp": convert_thread_ts(message_ts),
     }
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def get_reactions(
@@ -669,7 +669,7 @@ async def whoami() -> str:
     await log_to_slack("Checking authentication & identity")
     url = f"{SLACK_API_BASE}/auth.test"
     data = await make_request(url)
-    return data.get("user")
+    return data.get("user") if data else None
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
@@ -681,7 +681,7 @@ async def join_channel(channel_id: str, skip_log: bool = False) -> bool:
     url = f"{SLACK_API_BASE}/conversations.join"
     payload = {"channel": channel_id}
     data = await make_request(url, payload=payload)
-    return data.get("ok")
+    return bool(data and data.get("ok"))
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
@@ -965,7 +965,7 @@ async def send_dm(
     url = f"{SLACK_API_BASE}/conversations.open"
     payload = {"users": user_id, "return_dm": True}
     data = await make_request(url, payload=payload)
-    if data.get("ok"):
+    if data and data.get("ok"):
         return await post_message(
             data.get("channel").get("id"),
             message,
