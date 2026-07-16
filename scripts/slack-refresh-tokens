@@ -103,11 +103,12 @@ if ! python3 -c "import secretstorage" 2>/dev/null; then
 fi
 
 # --- Extract tokens ---
+export SLACK_DIR
 tokens=$(python3 -c "
 import sqlite3, os, hashlib, sys
 import secretstorage
 
-slack_dir = '$SLACK_DIR'
+slack_dir = os.environ['SLACK_DIR']
 
 # --- Get encryption key from system keyring ---
 # Supports both native ('application'='Slack') and Flatpak
