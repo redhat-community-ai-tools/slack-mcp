@@ -594,7 +594,11 @@ async def post_message(
     url = f"{SLACK_API_BASE}/chat.postMessage"
     payload = {"channel": channel_id, "text": message}
     if blocks:
-        payload["blocks"] = json.loads(blocks)
+        try:
+            payload["blocks"] = json.loads(blocks)
+        except json.JSONDecodeError as e:
+            log(f"Error: invalid blocks JSON: {e}")
+            return False
     if thread_ts:
         payload["thread_ts"] = convert_thread_ts(thread_ts)
     if not unfurl_links:
