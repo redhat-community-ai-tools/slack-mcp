@@ -116,14 +116,19 @@ slack_dir = os.environ['SLACK_DIR']
 bus = secretstorage.dbus_init()
 keyring_pass = None
 for coll in secretstorage.get_all_collections(bus):
-    for item in coll.get_all_items():
-        attrs = item.get_attributes()
-        if attrs.get('application') == 'Slack':
-            keyring_pass = item.get_secret().decode()
-            break
-        if attrs.get('user') == 'Slack Safe Storage' and attrs.get('server') == 'Slack Keys':
-            keyring_pass = item.get_secret().decode()
-            break
+    if coll.is_locked():
+        continue
+    try:
+        for item in coll.get_all_items():
+            attrs = item.get_attributes()
+            if attrs.get('application') == 'Slack':
+                keyring_pass = item.get_secret().decode()
+                break
+            if attrs.get('user') == 'Slack Safe Storage' and attrs.get('server') == 'Slack Keys':
+                keyring_pass = item.get_secret().decode()
+                break
+    except Exception:
+        pass
     if keyring_pass:
         break
 
