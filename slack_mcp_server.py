@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 from typing import Any, Literal
@@ -10,6 +11,8 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+
+__version__ = "1.0.0"
 
 
 def log(msg: str) -> None:
@@ -34,10 +37,27 @@ def _deny_if_read_only() -> None:
         )
 
 
-# Process --read-only before tool registration so write tools can be excluded
-if "--read-only" in sys.argv:
+# Parse CLI args before tool registration so --read-only can exclude write tools,
+# and so --help/--version print and exit before the token checks in main().
+_parser = argparse.ArgumentParser(
+    prog="slack-mcp",
+    description="MCP server for Slack (stdio by default). Configured via environment "
+                "variables; Slack session tokens are also read from a tokens.env file.",
+    epilog="Key env vars: SLACK_BOT_TOKEN OR SLACK_XOXC_TOKEN+SLACK_XOXD_TOKEN; "
+           "MCP_TRANSPORT (default stdio), LOGS_CHANNEL_ID, SLACK_TEAM_ID, "
+           "SLACK_MCP_DATA (default ~/.local/share/slack-mcp), "
+           "SLACK_MCP_TOKENS_FILE (default <data>/tokens.env), SLACK_MCP_READ_ONLY. "
+           "See the README for the full list.",
+)
+_parser.add_argument(
+    "--read-only",
+    action="store_true",
+    help="Disable all mutating Slack tools (same as SLACK_MCP_READ_ONLY=true).",
+)
+_parser.add_argument("--version", action="version", version=f"slack-mcp {__version__}")
+_args, _ = _parser.parse_known_args()  # ignore extra args an MCP client may pass through
+if _args.read_only:
     os.environ[READ_ONLY_ENV_VAR] = "true"
-    sys.argv = [a for a in sys.argv if a != "--read-only"]
 
 
 def _register_tool(annotations):
@@ -47,6 +67,56 @@ def _register_tool(annotations):
 
 
 SLACK_API_BASE = "https://slack.com/api"
+
+# Data directory: user-handle cache and, by default, tokens.env. Uses the XDG
+# data location so it lines up with the token files written by
+# scripts/slack-refresh-tokens and sourced by the container wrapper. Override
+# with SLACK_MCP_DATA; container mode can mount a volume there.
+DATA_DIR = Path(os.environ.get("SLACK_MCP_DATA", str(Path.home() / ".local" / "share" / "slack-mcp")))
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+USER_CACHE_FILE = DATA_DIR / ".user_cache.json"
+REVERSE_USER_CACHE_FILE = DATA_DIR / ".reverse_user_cache.json"
+REVERSE_CACHE_TTL_HOURS = 24
+
+# Slack session tokens may also come from a dotenv-style file (default
+# <data>/tokens.env — the file scripts/slack-refresh-tokens writes) so the
+# `slack-mcp` command works without the caller exporting them. Loaded before the
+# token globals below so a SLACK_BOT_TOKEN placed in the file also takes effect.
+TOKENS_FILE = Path(os.environ.get("SLACK_MCP_TOKENS_FILE", str(DATA_DIR / "tokens.env")))
+
+
+def _load_tokens_file(path: Path) -> None:
+    """Populate missing token env vars from a dotenv-style file (bare KEY=VALUE,
+    '#' comments, blank lines). tokens.env uses SLACK_MCP_XOXC_TOKEN /
+    SLACK_MCP_XOXD_TOKEN; map those onto the SLACK_XOXC_TOKEN / SLACK_XOXD_TOKEN
+    the server reads. Real environment variables take precedence."""
+    aliases = {
+        "SLACK_MCP_XOXC_TOKEN": "SLACK_XOXC_TOKEN",
+        "SLACK_MCP_XOXD_TOKEN": "SLACK_XOXD_TOKEN",
+    }
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    loaded = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")  # split on first '='; values may contain '='
+        target = aliases.get(key.strip(), key.strip())
+        if target not in os.environ:  # real env wins
+            os.environ[target] = value.strip().strip('"').strip("'")
+            loaded += 1
+    if loaded:
+        log(f"slack-mcp: loaded {loaded} token(s) from {path}")
+
+
+_load_tokens_file(TOKENS_FILE)
+
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 LOGS_CHANNEL_ID = os.environ.get("LOGS_CHANNEL_ID", "")
@@ -54,12 +124,6 @@ OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "compact").lower()
 # Required for Slack Enterprise Grid: workspace team ID (e.g. T027XXXXX).
 # Without this, conversations.create returns cannot_create_channel on org-level installs.
 SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
-
-# Cache file path (in same directory as script)
-SCRIPT_DIR = Path(__file__).parent
-USER_CACHE_FILE = SCRIPT_DIR / ".user_cache.json"
-REVERSE_USER_CACHE_FILE = SCRIPT_DIR / ".reverse_user_cache.json"
-REVERSE_CACHE_TTL_HOURS = 24
 
 # Cache for channel name to ID mapping
 _channel_cache: dict[str, str] = {}
@@ -1228,7 +1292,7 @@ async def search_channel_messages(
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_matches])
 
 
-if __name__ == "__main__":
+def main() -> None:
     _load_user_cache()
     if SLACK_BOT_TOKEN:
         if not SLACK_BOT_TOKEN.startswith("xoxb-"):
@@ -1254,3 +1318,7 @@ if __name__ == "__main__":
                 h.strip() for h in allowed_hosts.split(",") if h.strip()
         ]
     mcp.run(transport=MCP_TRANSPORT)
+
+
+if __name__ == "__main__":
+    main()
