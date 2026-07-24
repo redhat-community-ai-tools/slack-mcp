@@ -1083,6 +1083,45 @@ async def clear_usergroup(usergroup_id: str) -> bool:
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def update_usergroup_members(usergroup_id: str, user_ids: list[str]) -> bool:
+    """Set the members of a Slack usergroup, replacing the current membership entirely.
+
+    Args:
+        usergroup_id: The usergroup ID (S...) to update
+        user_ids: List of user IDs (U...) that should be the members. Must contain
+                  at least one user — use clear_usergroup to remove all members.
+
+    Returns:
+        True if the membership was updated successfully, False otherwise
+    """
+    _deny_if_read_only()
+
+    if not user_ids:
+        log("Error: user_ids list is empty — use clear_usergroup to remove all members")
+        return False
+
+    users_str = ",".join(user_ids)
+    user_mentions = ", ".join([f"<@{uid}>" for uid in user_ids])
+    await log_to_slack(f"Updating usergroup {usergroup_id} to {len(user_ids)} member(s): {user_mentions}")
+
+    url = f"{SLACK_API_BASE}/usergroups.users.update"
+    payload = {
+        "usergroup": usergroup_id,
+        "users": users_str,
+    }
+
+    data = await make_request(url, payload=payload)
+
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error updating usergroup members: {error_msg}")
+        return False
+
+    log(f"Successfully updated usergroup {usergroup_id} to {len(user_ids)} member(s)")
+    return True
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def send_dm(
     user_id: str,
     message: str,
