@@ -1,0 +1,177 @@
+{
+  "source": "https://docs.slack.dev/messaging/formatting-message-text",
+  "description": "Slack mrkdwn formatting reference. Slack uses mrkdwn, NOT standard Markdown. Key differences: *bold* (not **bold**), _italic_ (not *italic*), <url|text> (not [text](url)).",
+  "rules": [
+    {
+      "name": "bold",
+      "syntax": "*text*",
+      "description": "Bold text. Note: standard Markdown uses **text** for bold, but Slack uses single asterisks.",
+      "example": "*important*"
+    },
+    {
+      "name": "italic",
+      "syntax": "_text_",
+      "description": "Italic text. Note: in standard Markdown *text* means italic, but in Slack *text* means bold. Use underscores for italic.",
+      "example": "_emphasis_"
+    },
+    {
+      "name": "strikethrough",
+      "syntax": "~text~",
+      "description": "Strikethrough text. Standard Markdown uses ~~text~~ (double tilde), Slack uses single tilde.",
+      "example": "~removed~"
+    },
+    {
+      "name": "inline-code",
+      "syntax": "`text`",
+      "description": "Inline code. Same as standard Markdown. Text inside will not use any other formatting.",
+      "example": "use the `print()` function"
+    },
+    {
+      "name": "code-block",
+      "syntax": "```text```",
+      "description": "Multi-line code block. Do NOT include a language hint after the opening backticks — Slack does not support syntax highlighting and will render the language name as code.",
+      "example": "```\nimport os\nprint(os.getcwd())\n```"
+    },
+    {
+      "name": "blockquote",
+      "syntax": ">text",
+      "description": "Block quote. Prefix each quoted line with >. Each consecutive quoted line needs its own > prefix.",
+      "example": ">This is quoted\n>This is also quoted"
+    },
+    {
+      "name": "link",
+      "syntax": "<url|display text>",
+      "description": "Named link. Standard Markdown uses [text](url) but Slack uses angle brackets with a pipe separator. Plain URLs are auto-linked.",
+      "example": "<https://example.com|Click here>"
+    },
+    {
+      "name": "email-link",
+      "syntax": "<mailto:user@example.com|display text>",
+      "description": "Email link. Must use mailto: prefix.",
+      "example": "<mailto:team@example.com|Email the team>"
+    },
+    {
+      "name": "line-break",
+      "syntax": "\\n",
+      "description": "Newline. Use the literal string \\n in API-submitted text.",
+      "example": "Line one\\nLine two"
+    },
+    {
+      "name": "unordered-list",
+      "syntax": "• item",
+      "description": "Simulated bullet list. Slack has no native list syntax. Use the bullet character (•) with newlines.",
+      "example": "• Item one\\n• Item two\\n• Item three"
+    },
+    {
+      "name": "emoji",
+      "syntax": ":emoji_name:",
+      "description": "Emoji in colon format. Unicode emoji are also supported and auto-converted to colon format.",
+      "example": ":tada: :rocket: :white_check_mark:"
+    },
+    {
+      "name": "date",
+      "syntax": "<!date^UNIX_TIMESTAMP^{token_string}^optional_link|fallback>",
+      "description": "Dynamic date formatting. Renders dates in the viewer's local timezone. Tokens: {date_num}, {date}, {date_short}, {date_long}, {date_pretty}, {time}, {time_secs}, {ago}.",
+      "example": "<!date^1704067200^{date_short} at {time}|Jan 1, 2024>"
+    }
+  ],
+  "mentions": [
+    {
+      "name": "user-mention",
+      "syntax": "<@USER_ID>",
+      "description": "Mention a user by their Slack user ID (e.g. U012AB3CD). Do NOT use @username — it renders as plain text. Use resolve_user_id to look up the ID from a name.",
+      "example": "<@U012AB3CD>"
+    },
+    {
+      "name": "channel-link",
+      "syntax": "<#CHANNEL_ID>",
+      "description": "Link to a channel by its ID (e.g. C012AB3CD). Do NOT use #channel-name — it may not link. Use get_channel_id_by_name to look up the ID.",
+      "example": "<#C012AB3CD>"
+    },
+    {
+      "name": "user-group-mention",
+      "syntax": "<!subteam^GROUP_ID>",
+      "description": "Mention a user group by ID. The literal string !subteam^ is required before the group ID.",
+      "example": "<!subteam^SAZ94GDB8>"
+    },
+    {
+      "name": "here",
+      "syntax": "<!here>",
+      "description": "Notify active members of the channel. Use sparingly."
+    },
+    {
+      "name": "channel-notify",
+      "syntax": "<!channel>",
+      "description": "Notify ALL members of the channel, active or not."
+    },
+    {
+      "name": "everyone",
+      "syntax": "<!everyone>",
+      "description": "Notify everyone in #general. Most disruptive — use with extreme care."
+    }
+  ],
+  "escaping": [
+    {
+      "character": "&",
+      "escape_as": "&amp;",
+      "description": "Ampersand must be escaped as HTML entity"
+    },
+    {
+      "character": "<",
+      "escape_as": "&lt;",
+      "description": "Less-than must be escaped as HTML entity"
+    },
+    {
+      "character": ">",
+      "escape_as": "&gt;",
+      "description": "Greater-than must be escaped when used as literal text (not for blockquotes or link syntax)"
+    }
+  ],
+  "unsupported": [
+    {
+      "feature": "headings",
+      "markdown_syntax": "# Heading",
+      "note": "Not supported in mrkdwn. Use *bold text* on its own line, or header blocks in Block Kit."
+    },
+    {
+      "feature": "images",
+      "markdown_syntax": "![alt](url)",
+      "note": "Not supported in mrkdwn. Use image blocks in Block Kit."
+    },
+    {
+      "feature": "tables",
+      "markdown_syntax": "| col | col |",
+      "note": "Not supported in mrkdwn. Use code blocks for tabular data or rich_text blocks."
+    },
+    {
+      "feature": "ordered-lists",
+      "markdown_syntax": "1. item",
+      "note": "No native support. Simulate with numbered text and newlines: 1. item\\n2. item"
+    },
+    {
+      "feature": "horizontal-rule",
+      "markdown_syntax": "---",
+      "note": "Not supported in mrkdwn. Use divider blocks in Block Kit."
+    },
+    {
+      "feature": "nested-formatting",
+      "markdown_syntax": "**_bold italic_**",
+      "note": "Nested inline formatting is not reliably supported."
+    },
+    {
+      "feature": "markdown-bold",
+      "markdown_syntax": "**text**",
+      "note": "Does NOT work. Use *text* instead (single asterisks)."
+    },
+    {
+      "feature": "markdown-links",
+      "markdown_syntax": "[text](url)",
+      "note": "Does NOT work. Use <url|text> instead."
+    },
+    {
+      "feature": "code-block-language",
+      "markdown_syntax": "```python",
+      "note": "Language hints are NOT supported. The language name will be rendered as part of the code. Use plain ``` with no language."
+    }
+  ]
+}

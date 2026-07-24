@@ -707,6 +707,91 @@ async def resolve_user_id(query: str) -> list[dict[str, str]]:
     return results[:5]
 
 
+FORMATTING_GUIDE_FILE = SCRIPT_DIR / "formatting_guide.json"
+_formatting_guide: dict[str, Any] | None = None
+
+
+def _load_formatting_guide() -> dict[str, Any]:
+    """Load the Slack mrkdwn formatting guide from formatting_guide.json."""
+    global _formatting_guide
+    if _formatting_guide is not None:
+        return _formatting_guide
+
+    try:
+        if FORMATTING_GUIDE_FILE.exists():
+            with open(FORMATTING_GUIDE_FILE, "r") as f:
+                _formatting_guide = json.load(f)
+            log(f"Loaded formatting guide from {FORMATTING_GUIDE_FILE.name}")
+            return _formatting_guide
+    except Exception as e:
+        log(f"Error loading formatting guide: {e}")
+
+    _formatting_guide = {"rules": [], "unsupported": []}
+    return _formatting_guide
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_formatting_guide() -> dict[str, Any]:
+    """Get the Slack mrkdwn formatting guide for composing messages.
+
+    Call this before composing a Slack message. Slack uses mrkdwn, NOT standard
+    Markdown — the syntax differs in important ways.
+
+    Returns a guide with:
+    - rules: supported formatting options with syntax and examples
+    - unsupported: standard Markdown features that do NOT work in Slack
+    - escaping: characters that must be HTML-entity-escaped
+    - mentions: how to reference users, channels, and groups
+    """
+    return _load_formatting_guide()
+
+
+async def _resolve_mentions(text: str) -> str:
+    """Resolve @name references to Slack <@USER_ID> format.
+
+    Skips references already in <@...> format. Failed lookups are left unchanged.
+    Results are cached via _fetch_all_users() (24h TTL).
+    """
+    mention_pattern = r"(?<![<])@([\w][\w.\-]*)"
+    matches = list(re.finditer(mention_pattern, text))
+    if not matches:
+        return text
+
+    queries = {m.group(1) for m in matches}
+    resolved: dict[str, str] = {}
+    for query in queries:
+        users = await resolve_user_id(query)
+        if users:
+            resolved[query] = f"<@{users[0]['id']}>"
+
+    for query, replacement in resolved.items():
+        text = text.replace(f"@{query}", replacement)
+    return text
+
+
+async def _resolve_channels(text: str) -> str:
+    """Resolve #channel references to Slack <#CHANNEL_ID> format.
+
+    Skips references already in <#...> format. Failed lookups are left unchanged.
+    Results are cached via _channel_cache.
+    """
+    channel_pattern = r"(?<![<])#([\w][\w-]*)"
+    matches = list(re.finditer(channel_pattern, text))
+    if not matches:
+        return text
+
+    queries = {m.group(1) for m in matches}
+    resolved: dict[str, str] = {}
+    for name in queries:
+        channel_id = await get_channel_id_by_name(name)
+        if channel_id:
+            resolved[name] = f"<#{channel_id}>"
+
+    for name, replacement in resolved.items():
+        text = text.replace(f"#{name}", replacement)
+    return text
+
+
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
 async def post_message(
     channel_id: str,
@@ -716,9 +801,26 @@ async def post_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: str = "",
+    resolve_references: bool = True,
 ) -> bool:
-    """Post a message to a channel. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback."""
+    """Post a message to a channel.
+
+    IMPORTANT: Slack uses mrkdwn, NOT standard Markdown. You MUST call
+    get_formatting_guide first to learn the correct syntax before composing
+    the message.
+
+    By default, @handle and #channel references in the message text are automatically
+    resolved to Slack user/channel IDs so they render as proper mentions and links.
+    Set resolve_references=False to skip this if the message already uses
+    <@USER_ID>/<#CHANNEL_ID> format.
+
+    Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested
+    lists via rich_text blocks). When blocks is provided, message is used as the
+    plaintext fallback."""
     _deny_if_read_only()
+    if resolve_references:
+        message = await _resolve_mentions(message)
+        message = await _resolve_channels(message)
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
     await join_channel(channel_id, skip_log=skip_log)
@@ -1089,8 +1191,17 @@ async def send_dm(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: str = "",
+    resolve_references: bool = True,
 ) -> bool:
-    """Send a direct message to a user. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback."""
+    """Send a direct message to a user.
+
+    IMPORTANT: Slack uses mrkdwn, NOT standard Markdown. You MUST call
+    get_formatting_guide first to learn the correct syntax before composing
+    the message.
+
+    By default, @handle and #channel references are auto-resolved to Slack IDs.
+    Optionally pass Block Kit blocks as a JSON string for rich formatting. When blocks
+    is provided, message is used as the plaintext fallback."""
     _deny_if_read_only()
     await log_to_slack(f"Sending direct message to user <@{user_id}>: {message}")
     url = f"{SLACK_API_BASE}/conversations.open"
@@ -1104,6 +1215,7 @@ async def send_dm(
             unfurl_links=unfurl_links,
             unfurl_media=unfurl_media,
             blocks=blocks,
+            resolve_references=resolve_references,
         )
     return False
 
@@ -1115,8 +1227,15 @@ async def send_group_dm(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: str = "",
+    resolve_references: bool = True,
 ) -> bool:
     """Send a message to a group DM (multi-party direct message).
+
+    IMPORTANT: Slack uses mrkdwn, NOT standard Markdown. You MUST call
+    get_formatting_guide first to learn the correct syntax before composing
+    the message.
+
+    By default, @handle and #channel references are auto-resolved to Slack IDs.
 
     Args:
         user_ids: List of 2+ user IDs to include in group DM
@@ -1159,6 +1278,7 @@ async def send_group_dm(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
+        resolve_references=resolve_references,
     )
 
 
