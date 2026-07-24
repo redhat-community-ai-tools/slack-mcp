@@ -1,7 +1,7 @@
 ---
 name: slack-reauth
 version: "1.0"
-description: Refresh Slack MCP session tokens from the desktop app. Extracts xoxc/xoxd tokens automatically from the Slack app's on-disk storage — no DevTools, no copy-paste. Use when Slack MCP tools return auth errors, empty channel lists, or token expiry symptoms.
+description: Refresh Slack MCP session tokens from the desktop app (not browser). Extracts xoxc/xoxd tokens from the Slack desktop app's on-disk storage — no browser tab, no DevTools, no copy-paste. Use when Slack MCP tools return auth errors, empty channel lists, or token expiry symptoms.
 allowed-tools: Bash, Read, Write
 user-invocable: true
 ---
@@ -20,7 +20,7 @@ Invoke when:
 
 ## Background
 
-The Slack MCP server (`~/.config/slack-mcp/run-slack-mcp.sh`) authenticates using two browser session tokens:
+The Slack MCP server (`~/.config/slack-mcp/run-slack-mcp.sh`) authenticates using two session tokens extracted from the Slack desktop app's on-disk storage (NOT a browser — no browser tab needed):
 - `xoxc-*` — Slack web API Bearer token
 - `xoxd-*` — Slack session cookie (`d` cookie)
 
