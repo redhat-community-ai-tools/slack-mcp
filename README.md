@@ -151,13 +151,86 @@ If both `SLACK_BOT_TOKEN` and `SLACK_XOXC_TOKEN`/`SLACK_XOXD_TOKEN` are set, the
 For agents or automation that should **browse and search** Slack without posting, reacting, running commands, or joining channels, enable read-only mode.
 
 - **Environment variable:** set `SLACK_MCP_READ_ONLY` to a truthy value (`1`, `true`, `yes`, or `on`, case-insensitive).
-- **CLI:** pass `--read-only` when starting `slack_mcp_server.py` (equivalent to setting the variable).
+- **CLI:** pass `--read-only` when starting the server (e.g. `slack-mcp --read-only`, equivalent to setting the variable).
 
 In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `post_command`, `add_reaction`, `join_channel`) raise a clear error. Read tools (history, search, threads, `whoami`, channel listing, cache refresh helpers, and so on) behave as usual. Tool activity that would normally be mirrored to `LOGS_CHANNEL_ID` is written to **stderr** instead.
 
 On startup, the server logs a line to stderr when read-only mode is active.
 
 For Podman or Docker, add `-e SLACK_MCP_READ_ONLY=true` (and the matching key in `env`) when you want the container to run read-only.
+
+## Running as a uv tool (local, no container)
+
+Prefer not to run a container? Install slack-mcp as a [uv](https://docs.astral.sh/uv/) tool. This puts a `slack-mcp` command on your PATH that runs the server directly.
+
+Requires uv and Python ≥ 3.10.
+
+```bash
+# from a clone of this repo
+uv tool install .
+
+# or straight from git
+uv tool install git+https://github.com/redhat-community-ai-tools/slack-mcp
+```
+
+Run `slack-mcp --help` for a summary of flags and environment variables.
+
+### Tokens from `tokens.env` (recommended)
+
+`slack-mcp` reads Slack session tokens from `~/.local/share/slack-mcp/tokens.env` when they are not already set in the environment — the same file the token tooling writes:
+
+```bash
+scripts/slack-refresh-tokens          # or: python3 scripts/setup-slack-mcp.py
+```
+
+Then the MCP client config needs **no `env` block** — just the command:
+
+```json
+{
+  "mcpServers": {
+    "slack": {
+      "command": "slack-mcp"
+    }
+  }
+}
+```
+
+The file uses `SLACK_MCP_XOXC_TOKEN` / `SLACK_MCP_XOXD_TOKEN`; the server maps those onto the `SLACK_XOXC_TOKEN` / `SLACK_XOXD_TOKEN` it uses. Override the path with `SLACK_MCP_TOKENS_FILE`. **Real environment variables always take precedence over the file**, so you can still override per-client.
+
+### Tokens from the client config (alternative)
+
+To keep tokens in the MCP config instead of a file, pass them in `env`:
+
+```json
+{
+  "mcpServers": {
+    "slack": {
+      "command": "slack-mcp",
+      "env": {
+        "SLACK_XOXC_TOKEN": "xoxc-...",
+        "SLACK_XOXD_TOKEN": "xoxd-...",
+        "LOGS_CHANNEL_ID": "C7000000"
+      }
+    }
+  }
+}
+```
+
+A bot token works the same way — set `SLACK_BOT_TOKEN` in `env` instead of the `xoxc`/`xoxd` pair. If the client does not inherit your PATH, use the absolute path (`~/.local/bin/slack-mcp` after `uv tool install`), or launch via `uv run --directory /path/to/slack-mcp slack-mcp`.
+
+The user cache and the default `tokens.env` live under `~/.local/share/slack-mcp/` (override with `SLACK_MCP_DATA`).
+
+Claude Code (bot token):
+
+```bash
+claude mcp add slack -e SLACK_BOT_TOKEN=xoxb-... -- slack-mcp
+```
+
+Or, with `tokens.env` already in place, no env needed:
+
+```bash
+claude mcp add slack -- slack-mcp
+```
 
 ## Running with Podman or Docker
 
