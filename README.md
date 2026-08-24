@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants to interact with Slack workspaces. This server provides a bridge between AI tools and Slack, allowing you to read messages, post content, and manage Slack channels programmatically through MCP-compatible clients.
 
+Disclaimer: This is not an official Red Hat tool.
+
 ## What is this and why should I use it?
 
 This MCP server transforms your Slack workspace into an AI-accessible environment. It provides 21+ tools for comprehensive Slack interaction:
