@@ -80,6 +80,8 @@ except OSError:
 USER_CACHE_FILE = DATA_DIR / ".user_cache.json"
 REVERSE_USER_CACHE_FILE = DATA_DIR / ".reverse_user_cache.json"
 REVERSE_CACHE_TTL_HOURS = 24
+_reverse_user_memory_cache: list[dict[str, str]] = []
+_reverse_user_memory_cache_time: datetime | None = None
 
 # Slack session tokens may also come from a dotenv-style file (default
 # <data>/tokens.env — the file scripts/slack-refresh-tokens writes) so the
@@ -187,29 +189,40 @@ async def make_request(
         log("Error: stdio mode requires SLACK_XOXC_TOKEN and SLACK_XOXD_TOKEN (or SLACK_BOT_TOKEN)")
         return None
 
+    max_retries = 5
     async with httpx.AsyncClient(cookies=cookies) as client:
-        try:
-            if method.upper() == "GET":
-                response = await client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=payload,
-                    timeout=30.0,
-                )
-            else:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=30.0,
-                )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            log(str(e))
-            return None
+        for attempt in range(max_retries):
+            try:
+                if method.upper() == "GET":
+                    response = await client.request(
+                        method,
+                        url,
+                        headers=headers,
+                        params=payload,
+                        timeout=30.0,
+                    )
+                else:
+                    response = await client.request(
+                        method,
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=30.0,
+                    )
+                if response.status_code == 429 and attempt < max_retries - 1:
+                    try:
+                        delay = float(response.headers.get("Retry-After", "1"))
+                    except ValueError:
+                        delay = 1.0
+                    log(f"Rate limited (429), retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(max(delay, 1.0))
+                    continue
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                log(str(e))
+                return None
+    return None
 
 
 async def log_to_slack(message: str):
@@ -290,14 +303,15 @@ def _save_user_cache() -> None:
     try:
         with open(USER_CACHE_FILE, 'w') as f:
             json.dump(_user_cache, f, indent=2)
+            os.fchmod(f.fileno(), 0o660)
     except Exception as e:
         log(f"Error saving user cache: {e}")
 
 
 
 
-def _load_reverse_user_cache() -> list[dict[str, str]]:
-    """Load the reverse user cache from disk. Returns empty list if stale or missing."""
+def _load_reverse_user_cache() -> tuple[list[dict[str, str]], datetime | None]:
+    """Load the reverse user cache from disk. Returns (users, fetched_at) or ([], None) if stale or missing."""
     try:
         if REVERSE_USER_CACHE_FILE.exists():
             with open(REVERSE_USER_CACHE_FILE, 'r') as f:
@@ -307,11 +321,11 @@ def _load_reverse_user_cache() -> list[dict[str, str]]:
             if age_hours < REVERSE_CACHE_TTL_HOURS:
                 users = data.get("users", [])
                 log(f"Loaded reverse user cache ({len(users)} users, {age_hours:.1f}h old)")
-                return users
+                return users, fetched_at
             log(f"Reverse user cache expired ({age_hours:.1f}h old)")
     except Exception as e:
         log(f"Error loading reverse user cache: {e}")
-    return []
+    return [], None
 
 
 def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
@@ -327,6 +341,7 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
         }
         with open(REVERSE_USER_CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2)
+            os.fchmod(f.fileno(), 0o660)
         log(f"Saved reverse user cache ({len(sanitized)} users)")
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
@@ -334,13 +349,23 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
 
 async def _fetch_all_users() -> list[dict[str, str]]:
     """Fetch all workspace users via users.list with pagination. Returns simplified user records."""
-    cached = _load_reverse_user_cache()
+    global _reverse_user_memory_cache, _reverse_user_memory_cache_time
+
+    if _reverse_user_memory_cache and _reverse_user_memory_cache_time:
+        age_hours = (datetime.now(timezone.utc) - _reverse_user_memory_cache_time).total_seconds() / 3600
+        if age_hours < REVERSE_CACHE_TTL_HOURS:
+            return _reverse_user_memory_cache
+
+    cached, fetched_at = _load_reverse_user_cache()
     if cached:
+        _reverse_user_memory_cache = cached
+        _reverse_user_memory_cache_time = fetched_at
         return cached
 
     url = f"{SLACK_API_BASE}/users.list"
     all_users: list[dict[str, str]] = []
     cursor = None
+    complete = False
 
     while True:
         payload: dict[str, Any] = {"limit": 200}
@@ -367,15 +392,20 @@ async def _fetch_all_users() -> list[dict[str, str]]:
 
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
+            complete = True
             break
 
-    if all_users:
+    if all_users and complete:
         _save_reverse_user_cache(all_users)
+        _reverse_user_memory_cache = all_users
+        _reverse_user_memory_cache_time = datetime.now(timezone.utc)
         global _user_cache
         for u in all_users:
             display = u["display_name"] or u["real_name"] or u["handle"] or u["id"]
             _user_cache[u["id"]] = display
         _save_user_cache()
+    elif all_users:
+        log(f"Partial users.list fetch ({len(all_users)} users) — not caching")
 
     log(f"Fetched {len(all_users)} users from workspace")
     return all_users
@@ -712,19 +742,22 @@ async def refresh_channel_cache() -> bool:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_user_cache() -> int:
     """Clear the user cache. Use this when user handles are outdated or if user lookups are failing. Returns the number of cached entries cleared."""
-    global _user_cache
+    global _user_cache, _reverse_user_memory_cache, _reverse_user_memory_cache_time
     await log_to_slack("Clearing user cache")
     count = len(_user_cache)
     _user_cache.clear()
+    _reverse_user_memory_cache = []
+    _reverse_user_memory_cache_time = None
 
-    # Also remove the cache file
-    try:
-        if USER_CACHE_FILE.exists():
-            USER_CACHE_FILE.unlink()
-            log(f"Cleared {count} user cache entries and deleted cache file")
-    except Exception as e:
-        log(f"Cleared {count} user cache entries but failed to delete cache file: {e}")
+    # Also remove the cache files
+    for cache_file in (USER_CACHE_FILE, REVERSE_USER_CACHE_FILE):
+        try:
+            if cache_file.exists():
+                cache_file.unlink()
+        except Exception as e:
+            log(f"Failed to delete {cache_file.name}: {e}")
 
+    log(f"Cleared {count} user cache entries")
     return count
 
 
@@ -734,17 +767,37 @@ async def resolve_user_id(query: str) -> list[dict[str, str]]:
     """Resolve a Slack user ID from a name, @handle, or email address.
 
     Searches the full workspace member list (cached for 24h).
+    For email queries, tries users.lookupByEmail first (single fast request)
+    before falling back to the full directory walk.
     Returns up to 5 matches sorted by relevance: exact handle > exact email >
     case-insensitive name > partial substring match.
     Each result contains id, handle, real_name, display_name, and email.
     """
-    await log_to_slack(f"Resolving user ID for: {query}")
-    users = await _fetch_all_users()
-    if not users:
-        return []
+    await log_to_slack("Resolving a user ID")
 
     q = query.strip().lstrip("@").lower()
     if not q:
+        return []
+
+    if "@" in q and "." in q:
+        data = await make_request(
+            f"{SLACK_API_BASE}/users.lookupByEmail",
+            method="GET",
+            payload={"email": q},
+        )
+        if data and data.get("ok"):
+            user = data["user"]
+            profile = user.get("profile", {})
+            return [{
+                "id": user.get("id", ""),
+                "handle": user.get("name", ""),
+                "real_name": user.get("real_name", ""),
+                "display_name": profile.get("display_name", ""),
+                "email": profile.get("email", ""),
+            }]
+
+    users = await _fetch_all_users()
+    if not users:
         return []
 
     exact_handle: list[dict[str, str]] = []
