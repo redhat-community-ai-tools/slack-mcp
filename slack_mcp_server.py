@@ -303,14 +303,15 @@ def _save_user_cache() -> None:
     try:
         with open(USER_CACHE_FILE, 'w') as f:
             json.dump(_user_cache, f, indent=2)
+            os.fchmod(f.fileno(), 0o660)
     except Exception as e:
         log(f"Error saving user cache: {e}")
 
 
 
 
-def _load_reverse_user_cache() -> list[dict[str, str]]:
-    """Load the reverse user cache from disk. Returns empty list if stale or missing."""
+def _load_reverse_user_cache() -> tuple[list[dict[str, str]], datetime | None]:
+    """Load the reverse user cache from disk. Returns (users, fetched_at) or ([], None) if stale or missing."""
     try:
         if REVERSE_USER_CACHE_FILE.exists():
             with open(REVERSE_USER_CACHE_FILE, 'r') as f:
@@ -320,11 +321,11 @@ def _load_reverse_user_cache() -> list[dict[str, str]]:
             if age_hours < REVERSE_CACHE_TTL_HOURS:
                 users = data.get("users", [])
                 log(f"Loaded reverse user cache ({len(users)} users, {age_hours:.1f}h old)")
-                return users
+                return users, fetched_at
             log(f"Reverse user cache expired ({age_hours:.1f}h old)")
     except Exception as e:
         log(f"Error loading reverse user cache: {e}")
-    return []
+    return [], None
 
 
 def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
@@ -340,6 +341,7 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
         }
         with open(REVERSE_USER_CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2)
+            os.fchmod(f.fileno(), 0o660)
         log(f"Saved reverse user cache ({len(sanitized)} users)")
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
@@ -354,10 +356,10 @@ async def _fetch_all_users() -> list[dict[str, str]]:
         if age_hours < REVERSE_CACHE_TTL_HOURS:
             return _reverse_user_memory_cache
 
-    cached = _load_reverse_user_cache()
+    cached, fetched_at = _load_reverse_user_cache()
     if cached:
         _reverse_user_memory_cache = cached
-        _reverse_user_memory_cache_time = datetime.now(timezone.utc)
+        _reverse_user_memory_cache_time = fetched_at
         return cached
 
     url = f"{SLACK_API_BASE}/users.list"
