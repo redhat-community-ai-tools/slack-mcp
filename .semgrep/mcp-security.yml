@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Red Hat, Inc.
+#
+# Custom Semgrep rules for MCP server security.
+# Derived from prodsec-skills audit findings across the MCP fleet.
+#
+# Copy to .semgrep/mcp-security.yml in each repo, or run directly:
+#   semgrep --config path/to/mcp-security.yml .
+
+rules:
+  # ── Host binding ──────────────────────────────────────────────
+
+  - id: mcp-bind-all-interfaces
+    patterns:
+      - pattern-either:
+          - pattern: host = "0.0.0.0"
+          - pattern: host="0.0.0.0"
+          - pattern: default="0.0.0.0"
+          - pattern: '"0.0.0.0"'
+    message: >
+      Server binds to 0.0.0.0 — accessible on all network interfaces.
+      Use 127.0.0.1 for loopback-only binding unless remote access with
+      TLS is intentional.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: hardening-local
+      cwe: "CWE-668: Exposure of Resource to Wrong Sphere"
+
+  # ── Credential exposure ───────────────────────────────────────
+
+  - id: mcp-token-in-env-subprocess
+    patterns:
+      - pattern: |
+          {..., "env": {..., $TOKEN_VAR: $TOKEN_VALUE, ...}, ...}
+      - metavariable-regex:
+          metavariable: $TOKEN_VAR
+          regex: ".*(TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL).*"
+    message: >
+      Token passed via environment variable to subprocess — visible in
+      /proc/pid/environ. Write to a temp file with 600 permissions and
+      pass via _FILE env var instead.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: no-credential-forwarding
+      cwe: "CWE-526: Exposure of Sensitive Information Through Environmental Variables"
+
+  - id: mcp-token-in-fstring
+    patterns:
+      - pattern: f"...{$TOKEN}..."
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: ".*(api_token|api_key|api_secret|password|credential|auth_token|access_token|refresh_token|bearer_token|private_key).*"
+    message: >
+      Credential interpolated into f-string — may appear in logs or
+      error messages. Use a sanitized reference instead.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: no-credential-forwarding
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+
+  # ── Input validation ──────────────────────────────────────────
+
+  - id: mcp-unsanitized-jql
+    patterns:
+      - pattern-either:
+          - pattern: f"... ~ \"{$INPUT}\"..."
+          - pattern: f"...= \"{$INPUT}\"..."
+          - pattern: f"...= {$INPUT}..."
+      - metavariable-regex:
+          metavariable: $INPUT
+          regex: "^(?!.*sanitize).*$"
+    message: >
+      User input interpolated directly into JQL query string.
+      Use a sanitization function to escape JQL special characters
+      (quotes, backslashes, reserved words).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: input-output-sanitization
+      cwe: "CWE-943: Improper Neutralization of Special Elements in Data Query Logic"
+
+  - id: mcp-reflected-error-html
+    patterns:
+      - pattern-either:
+          - pattern: f"<...>{$PARAM}</...>".encode()
+          - pattern: f"<...>{$PARAM}<...>".encode()
+    message: >
+      User-controlled parameter reflected in HTML response without
+      escaping. Use html.escape() or return a static error message.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: input-output-sanitization
+      cwe: "CWE-79: Cross-site Scripting (XSS)"
+
+  # ── File permissions ──────────────────────────────────────────
+
+  - id: mcp-mkdir-without-chmod
+    patterns:
+      - pattern: $PATH.mkdir(...)
+      - pattern-not-inside: |
+          $PATH.mkdir(...)
+          ...
+          $PATH.chmod(...)
+    message: >
+      Directory created without explicit chmod. Credential directories
+      should be 700 (owner-only). Call .chmod(0o700) after mkdir.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: hardening-local
+      cwe: "CWE-276: Incorrect Default Permissions"
+
+  # ── Error handling ────────────────────────────────────────────
+
+  - id: mcp-upstream-error-leak
+    pattern: raise Exception(f"...$E.read()...")
+    message: >
+      Raw upstream error body forwarded to client. Log the full body
+      to stderr and return a generic error message to prevent leaking
+      internal API details.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: input-output-sanitization
+      cwe: "CWE-209: Generation of Error Message Containing Sensitive Information"
+
+  # ── Insecure defaults ────────────────────────────────────────
+
+  - id: mcp-debug-enabled
+    patterns:
+      - pattern-either:
+          - pattern: debug=True
+          - pattern: DEBUG = True
+          - pattern: DEBUG=True
+    message: >
+      Debug mode enabled. Disable debug in production — it may expose
+      stack traces, internal paths, and sensitive configuration.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: insecure-defaults
+      cwe: "CWE-489: Active Debug Code"
+
+  - id: mcp-tls-verify-disabled
+    patterns:
+      - pattern-either:
+          - pattern: verify=False
+          - pattern: ssl=False
+          - pattern: check_hostname=False
+    message: >
+      TLS verification disabled. This allows man-in-the-middle attacks.
+      Only disable for local development with an explicit comment.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      prodsec-skill: insecure-defaults
+      cwe: "CWE-295: Improper Certificate Validation"
