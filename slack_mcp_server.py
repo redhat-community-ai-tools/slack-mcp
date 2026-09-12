@@ -780,8 +780,11 @@ async def post_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: str = "",
-) -> bool:
-    """Post a message to a channel. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback."""
+) -> dict:
+    """Post a message to a channel. Optionally pass Block Kit blocks as a JSON string for rich formatting (e.g. nested lists via rich_text blocks). When blocks is provided, message is used as the plaintext fallback.
+
+    Returns a dict {"ok": bool, "ts": str}. On success, "ts" is the posted message's timestamp, which can be passed back as thread_ts to post threaded replies.
+    """
     _deny_if_read_only()
     if not skip_log:
         await log_to_slack(f"Posting message to channel <#{channel_id}>: {message}")
@@ -793,7 +796,7 @@ async def post_message(
             payload["blocks"] = json.loads(blocks)
         except json.JSONDecodeError as e:
             log(f"Error: invalid blocks JSON: {e}")
-            return False
+            return {"ok": False, "ts": ""}
     if thread_ts:
         payload["thread_ts"] = convert_thread_ts(thread_ts)
     if not unfurl_links:
@@ -801,7 +804,8 @@ async def post_message(
     if not unfurl_media:
         payload["unfurl_media"] = False
     data = await make_request(url, payload=payload)
-    return bool(data and data.get("ok"))
+    ok = bool(data and data.get("ok"))
+    return {"ok": ok, "ts": data.get("ts", "") if ok else ""}
 
 
 @_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
