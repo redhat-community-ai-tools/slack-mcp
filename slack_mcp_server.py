@@ -133,6 +133,8 @@ _channel_cache: dict[str, str] = {}
 
 # Cache for user ID to handle mapping
 _user_cache: dict[str, str] = {}
+_user_cache_lock = asyncio.Lock()
+_user_cache_gen: int = 0
 
 @asynccontextmanager
 async def _lifespan(app: "FastMCP"):
@@ -376,53 +378,66 @@ async def _fetch_all_users() -> list[dict[str, str]]:
         _reverse_user_memory_cache_time = fetched_at
         return cached
 
-    url = f"{SLACK_API_BASE}/users.list"
-    all_users: list[dict[str, str]] = []
-    cursor = None
-    complete = False
+    async with _user_cache_lock:
+        # Re-check after acquiring the lock — another task may have populated the cache.
+        if _reverse_user_memory_cache and _reverse_user_memory_cache_time:
+            age_hours = (datetime.now(timezone.utc) - _reverse_user_memory_cache_time).total_seconds() / 3600
+            if age_hours < REVERSE_CACHE_TTL_HOURS:
+                return _reverse_user_memory_cache
 
-    while True:
-        payload: dict[str, Any] = {"limit": 200}
-        if cursor:
-            payload["cursor"] = cursor
+        gen_at_start = _user_cache_gen
 
-        data = await make_request(url, method="GET", payload=payload)
-        if not data or not data.get("ok"):
-            error_msg = data.get("error", "Unknown error") if data else "No response"
-            log(f"Error fetching users.list: {error_msg}")
-            break
+        url = f"{SLACK_API_BASE}/users.list"
+        all_users: list[dict[str, str]] = []
+        cursor = None
+        complete = False
 
-        for member in data.get("members", []):
-            if member.get("deleted") or member.get("is_bot"):
-                continue
-            profile = member.get("profile", {})
-            all_users.append({
-                "id": member.get("id", ""),
-                "handle": member.get("name", ""),
-                "real_name": member.get("real_name", ""),
-                "display_name": profile.get("display_name", ""),
-                "email": profile.get("email", ""),
-            })
+        while True:
+            payload: dict[str, Any] = {"limit": 200}
+            if cursor:
+                payload["cursor"] = cursor
 
-        cursor = data.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            complete = True
-            break
+            data = await make_request(url, method="GET", payload=payload)
+            if not data or not data.get("ok"):
+                error_msg = data.get("error", "Unknown error") if data else "No response"
+                log(f"Error fetching users.list: {error_msg}")
+                break
 
-    if all_users and complete:
-        _save_reverse_user_cache(all_users)
-        _reverse_user_memory_cache = all_users
-        _reverse_user_memory_cache_time = datetime.now(timezone.utc)
-        global _user_cache
-        for u in all_users:
-            display = u["display_name"] or u["real_name"] or u["handle"] or u["id"]
-            _user_cache[u["id"]] = display
-        _save_user_cache()
-    elif all_users:
-        log(f"Partial users.list fetch ({len(all_users)} users) — not caching")
+            for member in data.get("members", []):
+                if member.get("deleted") or member.get("is_bot"):
+                    continue
+                profile = member.get("profile", {})
+                all_users.append({
+                    "id": member.get("id", ""),
+                    "handle": member.get("name", ""),
+                    "real_name": member.get("real_name", ""),
+                    "display_name": profile.get("display_name", ""),
+                    "email": profile.get("email", ""),
+                })
 
-    log(f"Fetched {len(all_users)} users from workspace")
-    return all_users
+            cursor = data.get("response_metadata", {}).get("next_cursor")
+            if not cursor:
+                complete = True
+                break
+
+        if _user_cache_gen != gen_at_start:
+            log("Cache generation changed during fetch — discarding stale results")
+            return all_users
+
+        if all_users and complete:
+            _save_reverse_user_cache(all_users)
+            _reverse_user_memory_cache = all_users
+            _reverse_user_memory_cache_time = datetime.now(timezone.utc)
+            global _user_cache
+            for u in all_users:
+                display = u["display_name"] or u["real_name"] or u["handle"] or u["id"]
+                _user_cache[u["id"]] = display
+            _save_user_cache()
+        elif all_users:
+            log(f"Partial users.list fetch ({len(all_users)} users) — not caching")
+
+        log(f"Fetched {len(all_users)} users from workspace")
+        return all_users
 
 async def get_user_handle(user_id: str) -> str:
     """Get user handle by ID with caching. Returns user_id if lookup fails."""
@@ -756,8 +771,9 @@ async def refresh_channel_cache() -> bool:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def refresh_user_cache() -> int:
     """Clear the user cache. Use this when user handles are outdated or if user lookups are failing. Returns the number of cached entries cleared."""
-    global _user_cache, _reverse_user_memory_cache, _reverse_user_memory_cache_time
+    global _user_cache, _reverse_user_memory_cache, _reverse_user_memory_cache_time, _user_cache_gen
     await log_to_slack("Clearing user cache")
+    _user_cache_gen += 1
     count = len(_user_cache)
     _user_cache.clear()
     _reverse_user_memory_cache = []
