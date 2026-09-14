@@ -1204,7 +1204,7 @@ async def send_dm(
     payload = {"users": user_id, "return_dm": True}
     data = await make_request(url, payload=payload)
     if data and data.get("ok"):
-        return await post_message(
+        result = await post_message(
             data.get("channel", {}).get("id"),
             message,
             skip_log=True,
@@ -1212,6 +1212,7 @@ async def send_dm(
             unfurl_media=unfurl_media,
             blocks=blocks,
         )
+        return bool(result.get("ok"))
     return False
 
 
@@ -1259,14 +1260,14 @@ async def send_group_dm(
         log("Error: No channel ID returned from conversations.open")
         return False
 
-    return await post_message(
+    return bool((await post_message(
         channel_id,
         message,
         skip_log=True,
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
-    )
+    )).get("ok"))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))

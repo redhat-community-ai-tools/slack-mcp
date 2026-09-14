@@ -54,3 +54,59 @@ class TestPostMessage:
             result = await sms.post_message("C123", "hello", blocks="{not valid json")
             assert result == {"ok": False, "ts": ""}
             mock_req.assert_not_called()
+
+
+class TestSendDm:
+    @pytest.mark.asyncio
+    async def test_returns_true_when_post_message_succeeds(self):
+        with patch.object(sms, "make_request", new_callable=AsyncMock) as mock_req:
+            mock_req.side_effect = [
+                {"ok": True, "channel": {"id": "D123"}},
+                {"ok": True, "ts": "1728000000.123456"},
+            ]
+            result = await sms.send_dm("U123", "hi")
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_post_message_fails(self):
+        with patch.object(sms, "make_request", new_callable=AsyncMock) as mock_req:
+            mock_req.side_effect = [
+                {"ok": True, "channel": {"id": "D123"}},
+                {"ok": False, "error": "channel_not_found"},
+            ]
+            result = await sms.send_dm("U123", "hi")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_conversations_open_fails(self):
+        with patch.object(sms, "make_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"ok": False, "error": "user_not_found"}
+            result = await sms.send_dm("U123", "hi")
+            assert result is False
+
+
+class TestSendGroupDm:
+    @pytest.mark.asyncio
+    async def test_returns_true_when_post_message_succeeds(self):
+        with patch.object(sms, "make_request", new_callable=AsyncMock) as mock_req:
+            mock_req.side_effect = [
+                {"ok": True, "channel": {"id": "D456"}},
+                {"ok": True, "ts": "1728000000.654321"},
+            ]
+            result = await sms.send_group_dm(["U1", "U2"], "hi team")
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_post_message_fails(self):
+        with patch.object(sms, "make_request", new_callable=AsyncMock) as mock_req:
+            mock_req.side_effect = [
+                {"ok": True, "channel": {"id": "D456"}},
+                {"ok": False, "error": "channel_not_found"},
+            ]
+            result = await sms.send_group_dm(["U1", "U2"], "hi team")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_with_fewer_than_two_users(self):
+        result = await sms.send_group_dm(["U1"], "hi team")
+        assert result is False
