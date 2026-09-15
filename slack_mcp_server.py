@@ -440,6 +440,17 @@ async def replace_user_mentions(text: str) -> str:
     return text
 
 
+# Fields to keep from Slack's own per-file metadata when a message has attachments.
+FILE_METADATA_FIELDS = (
+    "id",
+    "name",
+    "mimetype",
+    "url_private",
+    "url_private_download",
+    "permalink",
+)
+
+
 async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str:
     """Filter message to only essential fields to reduce token usage."""
     # Extract essential fields
@@ -452,6 +463,15 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
     channel = message.get("channel", {})
     channel_id = channel.get("id", "") if isinstance(channel, dict) else ""
     channel_name = channel.get("name", "") if isinstance(channel, dict) else ""
+
+    # Extract file attachment metadata, if any (Slack includes this natively
+    # on the raw message object -- see https://api.slack.com/messaging/files).
+    raw_files = message.get("files") or []
+    files = [
+        {field: f[field] for field in FILE_METADATA_FIELDS if field in f}
+        for f in raw_files
+        if isinstance(f, dict)
+    ]
 
     # Get user handle instead of ID
     user_handle = await get_user_handle(user_id) if user_id else ""
@@ -472,6 +492,8 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
             filtered["channel_id"] = channel_id
         if channel_name:
             filtered["channel_name"] = channel_name
+        if files:
+            filtered["files"] = files
         return filtered
     else:
         # Return compact text format (default)
@@ -480,6 +502,9 @@ async def filter_message_fields(message: dict[str, Any]) -> dict[str, Any] | str
             result += f" [channel:{channel_id}|{channel_name}]"
         if thread_ts and thread_ts != ts:
             result += f" [thread:{thread_ts}]"
+        if files:
+            names = ", ".join(f.get("name", "unnamed") for f in files)
+            result += f" [files: {names}]"
         return result
 
 
