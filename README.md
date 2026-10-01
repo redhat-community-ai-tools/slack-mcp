@@ -72,6 +72,7 @@ python3 slack-mcp/scripts/setup-slack-mcp.py
 | `--workspace https://myco.slack.com` | Specific Slack workspace to open                                          |
 | `--refresh-tokens`                   | Re-extract tokens when they expire (skips all other steps)                |
 | `--skip-verify`                      | Skip the post-setup smoke test                                            |
+| `--read-only`                        | Run the server in [read-only mode](#read-only-mode) (no mutating tools)   |
 
 
 When tokens expire, just run:

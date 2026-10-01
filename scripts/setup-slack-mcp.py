@@ -16,6 +16,7 @@ Usage:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens                    # re-extract tokens
   python3 setup-slack-mcp.py --set-logs-channel DXXXXXXXXX       # skip the prompt
+  python3 setup-slack-mcp.py --read-only                         # disable mutating tools
 """
 
 import argparse
@@ -414,7 +415,7 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> str:
     return ""
 
 
-def write_wrapper(logs_channel: str) -> None:
+def write_wrapper(logs_channel: str, read_only: bool) -> None:
     banner("Writing MCP wrapper script")
 
     runtime = "podman" if shutil.which("podman") else "docker"
@@ -427,6 +428,8 @@ def write_wrapper(logs_channel: str) -> None:
     ]
     if logs_channel:
         env_lines.append(f'  -e LOGS_CHANNEL_ID="{logs_channel}" \\')
+    if read_only:
+        env_lines.append('  -e SLACK_MCP_READ_ONLY=true \\')
 
     env_block = "\n".join(env_lines)
 
@@ -539,6 +542,7 @@ Examples:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens
   python3 setup-slack-mcp.py --set-logs-channel C01234567
+  python3 setup-slack-mcp.py --read-only
         """,
     )
     parser.add_argument(
@@ -557,6 +561,12 @@ Examples:
         action="store_true",
         help="Skip the smoke-test after setup",
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Run the MCP server in read-only mode (disables post_message, send_dm, "
+             "post_command, add_reaction, join_channel; same as SLACK_MCP_READ_ONLY=true)",
+    )
     args = parser.parse_args()
 
     print()
@@ -572,7 +582,7 @@ Examples:
     pull_image()
     channel_id_from_browser = extract_tokens(python, DEFAULT_WORKSPACE, refresh=args.refresh_tokens)
     logs_channel = args.set_logs_channel or channel_id_from_browser or prompt_logs_channel()
-    write_wrapper(logs_channel)
+    write_wrapper(logs_channel, read_only=args.read_only)
     register_mcp()
 
     if not args.skip_verify:
