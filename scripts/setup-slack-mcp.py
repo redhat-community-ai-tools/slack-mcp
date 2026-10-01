@@ -16,7 +16,10 @@ Usage:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens                    # re-extract tokens
   python3 setup-slack-mcp.py --set-logs-channel DXXXXXXXXX       # skip the prompt
-  python3 setup-slack-mcp.py --read-only                         # disable mutating tools
+
+To run in read-only mode, edit the "slack" entry's "env" in ~/.claude.json
+after setup and add {"SLACK_MCP_READ_ONLY": "true"} — no need to re-run this
+script. The generated wrapper forwards it automatically.
 """
 
 import argparse
@@ -415,21 +418,24 @@ def extract_tokens(python: Path, workspace_url: str, refresh: bool) -> str:
     return ""
 
 
-def write_wrapper(logs_channel: str, read_only: bool) -> None:
+def write_wrapper(logs_channel: str) -> None:
     banner("Writing MCP wrapper script")
 
     runtime = "podman" if shutil.which("podman") else "docker"
 
-    # Build env args as a list so there are no stray line-continuation issues
+    # Build env args as a list so there are no stray line-continuation issues.
+    # SLACK_MCP_READ_ONLY is forwarded from the wrapper's own environment (not
+    # baked in at setup time) so read-only mode can be toggled later just by
+    # editing the "env" block for this server in Claude Code's config, without
+    # re-running this script.
     env_lines = [
         '  -e SLACK_XOXC_TOKEN="${SLACK_MCP_XOXC_TOKEN}" \\',
         '  -e SLACK_XOXD_TOKEN="${SLACK_MCP_XOXD_TOKEN}" \\',
         "  -e MCP_TRANSPORT=stdio \\",
+        '  -e SLACK_MCP_READ_ONLY="${SLACK_MCP_READ_ONLY:-}" \\',
     ]
     if logs_channel:
         env_lines.append(f'  -e LOGS_CHANNEL_ID="{logs_channel}" \\')
-    if read_only:
-        env_lines.append('  -e SLACK_MCP_READ_ONLY=true \\')
 
     env_block = "\n".join(env_lines)
 
@@ -452,7 +458,7 @@ source "$TOKENS"
 
 exec {runtime} run -i --rm \\
 {env_block}
-  {MCP_IMAGE}
+  {MCP_IMAGE} "$@"
 """
     WRAPPER_SCRIPT.write_text(content)
     WRAPPER_SCRIPT.chmod(0o755)
@@ -542,7 +548,6 @@ Examples:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens
   python3 setup-slack-mcp.py --set-logs-channel C01234567
-  python3 setup-slack-mcp.py --read-only
         """,
     )
     parser.add_argument(
@@ -561,12 +566,6 @@ Examples:
         action="store_true",
         help="Skip the smoke-test after setup",
     )
-    parser.add_argument(
-        "--read-only",
-        action="store_true",
-        help="Run the MCP server in read-only mode (disables post_message, send_dm, "
-             "post_command, add_reaction, join_channel; same as SLACK_MCP_READ_ONLY=true)",
-    )
     args = parser.parse_args()
 
     print()
@@ -582,7 +581,7 @@ Examples:
     pull_image()
     channel_id_from_browser = extract_tokens(python, DEFAULT_WORKSPACE, refresh=args.refresh_tokens)
     logs_channel = args.set_logs_channel or channel_id_from_browser or prompt_logs_channel()
-    write_wrapper(logs_channel, read_only=args.read_only)
+    write_wrapper(logs_channel)
     register_mcp()
 
     if not args.skip_verify:

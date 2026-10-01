@@ -72,7 +72,6 @@ python3 slack-mcp/scripts/setup-slack-mcp.py
 | `--workspace https://myco.slack.com` | Specific Slack workspace to open                                          |
 | `--refresh-tokens`                   | Re-extract tokens when they expire (skips all other steps)                |
 | `--skip-verify`                      | Skip the post-setup smoke test                                            |
-| `--read-only`                        | Run the server in [read-only mode](#read-only-mode) (no mutating tools)   |
 
 
 When tokens expire, just run:
@@ -161,6 +160,8 @@ In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `po
 On startup, the server logs a line to stderr when read-only mode is active.
 
 For Podman or Docker, add `-e SLACK_MCP_READ_ONLY=true` (and the matching key in `env`) when you want the container to run read-only.
+
+If you used `setup-slack-mcp.py`, the generated wrapper script already forwards `SLACK_MCP_READ_ONLY` from its own environment into the container. To toggle read-only mode, add `"SLACK_MCP_READ_ONLY": "true"` to this server's `env` block in `~/.claude.json` and restart Claude Code — no need to re-run the setup script.
 
 ## Running as a uv tool (local, no container)
 
