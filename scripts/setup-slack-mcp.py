@@ -16,10 +16,6 @@ Usage:
   python3 setup-slack-mcp.py
   python3 setup-slack-mcp.py --refresh-tokens                    # re-extract tokens
   python3 setup-slack-mcp.py --set-logs-channel DXXXXXXXXX       # skip the prompt
-
-To run in read-only mode, edit the "slack" entry's "env" in ~/.claude.json
-after setup and add {"SLACK_MCP_READ_ONLY": "true"} — no need to re-run this
-script. The generated wrapper forwards it automatically.
 """
 
 import argparse
@@ -423,11 +419,7 @@ def write_wrapper(logs_channel: str) -> None:
 
     runtime = "podman" if shutil.which("podman") else "docker"
 
-    # Build env args as a list so there are no stray line-continuation issues.
-    # SLACK_MCP_READ_ONLY is forwarded from the wrapper's own environment (not
-    # baked in at setup time) so read-only mode can be toggled later just by
-    # editing the "env" block for this server in Claude Code's config, without
-    # re-running this script.
+    # Build env args as a list so there are no stray line-continuation issues
     env_lines = [
         '  -e SLACK_XOXC_TOKEN="${SLACK_MCP_XOXC_TOKEN}" \\',
         '  -e SLACK_XOXD_TOKEN="${SLACK_MCP_XOXD_TOKEN}" \\',
