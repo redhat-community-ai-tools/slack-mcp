@@ -140,6 +140,7 @@ _user_cache_gen: int = 0
 async def _lifespan(app: "FastMCP"):
     """Warm the reverse-user cache in the background on server startup."""
     async def _warmup():
+        """Fetch and cache the full user directory in the background at startup."""
         try:
             users = await _fetch_all_users()
             log(f"Cache warmup complete ({len(users)} users)")
@@ -168,6 +169,7 @@ def _get_session_tokens_from_env() -> tuple[str, str] | None:
 async def make_request(
     url: str, method: str = "POST", payload: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
+    """Send an authenticated HTTP request to the Slack API, retrying up to 5 times on HTTP 429."""
     cookies: dict[str, str] = {}
 
     if SLACK_BOT_TOKEN:
