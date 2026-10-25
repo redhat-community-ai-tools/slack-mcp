@@ -38,7 +38,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
 
       - name: Build and push
         uses: docker/build-push-action@v6
