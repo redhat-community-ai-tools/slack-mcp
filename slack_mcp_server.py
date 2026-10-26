@@ -1067,6 +1067,105 @@ async def list_joined_channels(
     return all_channels
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_unread_direct_messages(limit: int = 20) -> dict[str, Any]:
+    """List unread 1:1 DMs and their messages without marking them read.
+
+    Uses Slack's browser-session client.counts endpoint for read state because
+    enterprise workspaces may reject conversations.list/users.conversations.
+    Requires the xoxc/xoxd browser-session authentication method; Slack does
+    not expose this client endpoint to bot tokens. Only the newest 100 unread
+    messages per DM are returned; a truncated flag marks the limit.
+    """
+    if SLACK_BOT_TOKEN:
+        return {"error": "Unread DM state requires browser-session authentication."}
+    if not 1 <= limit <= 50:
+        return {"error": "limit must be between 1 and 50."}
+    auth = await make_request(f"{SLACK_API_BASE}/auth.test")
+    if not auth or not auth.get("ok") or not auth.get("team_id"):
+        return {"error": "Could not determine the authenticated Slack workspace."}
+    team_id = auth["team_id"]
+    counts = await make_request(f"{SLACK_API_BASE}/client.counts", payload={"team_id": team_id})
+    if not counts or not counts.get("ok"):
+        return {"error": "Unread DM counts are unavailable for this Slack session."}
+    if not isinstance(counts.get("ims"), list):
+        return {"error": "Slack did not return a DM count list."}
+
+    unread = [im for im in counts.get("ims", []) if im.get("has_unreads") and im.get("id")]
+    entries: list[dict[str, Any]] = []
+    for im in unread[:limit]:
+        channel_id = im["id"]
+        info = await make_request(
+            f"{SLACK_API_BASE}/conversations.info", method="GET", payload={"channel": channel_id}
+        )
+        if not info or not info.get("ok"):
+            entries.append({"channel_id": channel_id, "error": "Could not read DM metadata."})
+            continue
+        channel = info.get("channel", {})
+        last_read = channel.get("last_read") or im.get("last_read")
+        other_user = channel.get("user") or ""
+        result: dict[str, Any] = {
+            "channel_id": channel_id,
+            "user": await get_user_handle(other_user) if other_user else other_user,
+            "unread_count": channel.get("unread_count"),
+            "last_read": last_read,
+            "url": f"https://app.slack.com/client/{team_id}/{channel_id}",
+        }
+        if not last_read:
+            result["messages"] = []
+            result["note"] = "Read marker unavailable; unread messages not fetched."
+            entries.append(result)
+            continue
+        messages: list[dict[str, Any]] = []
+        cursor = None
+        while len(messages) < 100:
+            params = {"channel": channel_id, "oldest": last_read, "limit": min(100, 100 - len(messages))}
+            if cursor:
+                params["cursor"] = cursor
+            history = await make_request(
+                f"{SLACK_API_BASE}/conversations.history", method="GET", payload=params
+            )
+            if not history or not history.get("ok"):
+                result["note"] = "DM history could not be fetched."
+                break
+            page_messages = history.get("messages", [])
+            for message in page_messages:
+                if message.get("user") == auth.get("user_id"):
+                    continue
+                messages.append({
+                    "ts": message.get("ts"),
+                    "text": message.get("text", ""),
+                    "user": await get_user_handle(message.get("user", "")),
+                })
+            next_cursor = history.get("response_metadata", {}).get("next_cursor")
+            if not next_cursor:
+                cursor = None
+                break
+            if not page_messages or next_cursor == cursor:
+                result["note"] = "DM history pagination stopped early."
+                break
+            cursor = next_cursor
+        result["messages"] = messages
+        if cursor:
+            result["truncated"] = True
+        if (
+            "note" not in result
+            and isinstance(result["unread_count"], int)
+            and len(messages) < result["unread_count"]
+        ):
+            result["note"] = (
+                "Some unread items are not in channel history (for example thread replies)."
+            )
+        entries.append(result)
+
+    return {
+        "team_id": team_id,
+        "unread_conversations": len(unread),
+        "direct_messages": entries,
+        "truncated": len(unread) > limit,
+    }
+
+
 async def get_random_deleted_user() -> str | None:
     """Get a random deleted user ID for clearing usergroups.
 
