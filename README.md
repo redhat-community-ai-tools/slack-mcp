@@ -11,6 +11,8 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 **Message & Thread Operations**
 
 - Read channel history with date filtering and thread support
+- List unread direct messages with read markers (browser-session auth only;
+  uses Slack's `client.counts` endpoint, which is not part of the public Web API)
 - Post messages and replies to threads
 - Search messages across workspace or within specific channels
 - Execute Slack commands
