@@ -641,6 +641,98 @@ async def get_channel_history(
     return await asyncio.gather(*[filter_message_fields(msg) for msg in all_messages])
 
 
+# Conversations APIs that Enterprise Grid blocks for org-level (xoxc) sessions.
+GRID_RESTRICTED_ERRORS = frozenset({
+    "enterprise_is_restricted",
+    "method_not_supported_for_channel_type",
+    "not_allowed_token_type",
+})
+
+
+async def _fetch_conversations_via_user_boot() -> list[dict[str, Any]] | None:
+    """Enumerate the user's conversations via Slack's web-client bootstrap.
+
+    Enterprise Grid rejects conversations.list/users.conversations with
+    ``enterprise_is_restricted`` for org-level browser sessions. client.userBoot
+    is the endpoint the Slack web client itself uses; it returns every channel,
+    group DM and IM visible to the user, so it works as a fallback there.
+
+    Returns None when the endpoint is unavailable, so callers can keep their
+    previous (empty or cached) result.
+    """
+    data = await make_request(f"{SLACK_API_BASE}/client.userBoot")
+    if not data or not data.get("ok"):
+        error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
+        log(f"Error fetching client.userBoot: {error_msg}")
+        return None
+
+    conversations: list[dict[str, Any]] = []
+
+    for ch in data.get("channels") or []:
+        if not ch.get("id"):
+            continue
+        entry: dict[str, Any] = {
+            "id": ch["id"],
+            "name": ch.get("name_normalized") or ch.get("name", ""),
+            "is_private": bool(ch.get("is_private")),
+            "is_archived": bool(ch.get("is_archived")),
+        }
+        if ch.get("context_team_id"):
+            entry["team_id"] = ch["context_team_id"]
+        if ch.get("is_mpim"):
+            entry["is_mpim"] = True
+        conversations.append(entry)
+
+    for im in data.get("ims") or []:
+        if not im.get("id"):
+            continue
+        conversations.append({
+            "id": im["id"],
+            "name": im.get("user") or im["id"],
+            "is_private": True,
+            "is_archived": False,
+            "is_im": True,
+            "user": im.get("user", ""),
+        })
+
+    for mpim in data.get("mpims") or []:
+        if not mpim.get("id"):
+            continue
+        conversations.append({
+            "id": mpim["id"],
+            "name": mpim.get("name") or mpim["id"],
+            "is_private": True,
+            "is_archived": bool(mpim.get("is_archived")),
+            "is_mpim": True,
+        })
+
+    log(f"client.userBoot fallback returned {len(conversations)} conversations")
+    return conversations
+
+
+def _filter_conversations(
+    conversations: list[dict[str, Any]],
+    types: str,
+    exclude_archived: bool,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Apply users.conversations style ``types``/``exclude_archived`` filters."""
+    wanted = {t.strip() for t in types.split(",") if t.strip()}
+
+    def keep(conv: dict[str, Any]) -> bool:
+        if exclude_archived and conv.get("is_archived"):
+            return False
+        if conv.get("is_im"):
+            return "im" in wanted
+        if conv.get("is_mpim"):
+            return "mpim" in wanted
+        if conv.get("is_private"):
+            return "private_channel" in wanted
+        return "public_channel" in wanted
+
+    return [conv for conv in conversations if keep(conv)][:limit]
+
+
 async def _load_channels_to_cache() -> bool:
     """Load all channels into the cache with pagination. Returns True if successful."""
     global _channel_cache
@@ -663,6 +755,17 @@ async def _load_channels_to_cache() -> bool:
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
             log(f"Error loading channels to cache: {error_msg}")
+            if error_msg in GRID_RESTRICTED_ERRORS:
+                fallback = await _fetch_conversations_via_user_boot()
+                if fallback is not None:
+                    _channel_cache.clear()
+                    for conv in fallback:
+                        if conv.get("is_im") or conv.get("is_mpim"):
+                            continue
+                        if conv.get("name") and conv.get("id"):
+                            _channel_cache[conv["name"]] = conv["id"]
+                    log(f"Loaded {len(_channel_cache)} channels into cache via client.userBoot")
+                    return bool(_channel_cache)
             return bool(_channel_cache)
 
         for channel in data.get("channels", []):
@@ -1022,6 +1125,10 @@ async def list_joined_channels(
     Uses Slack's users.conversations API. By default returns public and private
     channels only. To include DMs and group DMs, set types to e.g.
     \"public_channel,private_channel,im,mpim\".
+
+    Enterprise Grid rejects users.conversations for org-level sessions
+    (``enterprise_is_restricted``); in that case the list is built from
+    client.userBoot instead, which is what the Slack web client uses.
     """
     await log_to_slack(
         f"Listing joined channels (limit: {limit}, types: {types}, exclude_archived: {exclude_archived})"
@@ -1029,6 +1136,7 @@ async def list_joined_channels(
     url = f"{SLACK_API_BASE}/users.conversations"
     all_channels: list[dict[str, Any]] = []
     cursor: str | None = None
+    restricted_error = False
 
     while len(all_channels) < limit:
         payload: dict[str, Any] = {
@@ -1044,6 +1152,7 @@ async def list_joined_channels(
         if not data or not data.get("ok"):
             error_msg = data.get("error", "Unknown error") if data else "No response from Slack API"
             log(f"Error listing joined channels: {error_msg}")
+            restricted_error = error_msg in GRID_RESTRICTED_ERRORS
             break
 
         for ch in data.get("channels", []):
@@ -1062,6 +1171,11 @@ async def list_joined_channels(
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
             break
+
+    if not all_channels and restricted_error:
+        fallback = await _fetch_conversations_via_user_boot()
+        if fallback is not None:
+            all_channels = _filter_conversations(fallback, types, exclude_archived, limit)
 
     log(f"Listed {len(all_channels)} joined channels")
     return all_channels
