@@ -29,6 +29,13 @@ This MCP server transforms your Slack workspace into an AI-accessible environmen
 - Send direct messages and group DMs
 - Manage usergroups (clear members)
 
+**Slack Lists (browser-session auth only)**
+
+- List the lists visible to you, filtered by title
+- Read a list's columns and items, including linked messages
+- Read one item with its source message and thread replies
+- Archive, restore, and permanently delete items
+
 **Utility**
 
 - Check authentication status
@@ -162,6 +169,26 @@ In read-only mode, tools that mutate Slack state (`post_message`, `send_dm`, `po
 On startup, the server logs a line to stderr when read-only mode is active.
 
 For Podman or Docker, add `-e SLACK_MCP_READ_ONLY=true` (and the matching key in `env`) when you want the container to run read-only.
+
+### Slack Lists
+
+Lists are read and changed through Slack's web-client endpoints
+(`lists.records.*`), so these tools require browser-session authentication
+(`SLACK_XOXC_TOKEN` + `SLACK_XOXD_TOKEN`). A bot token returns a clear error:
+the public `slackLists.*` API does not expose archiving.
+
+| Tool | Purpose |
+| --- | --- |
+| `list_slack_lists` | Find lists by title; returns IDs, owners, row counts |
+| `get_slack_list` | Columns and items; accepts an `F…` ID or a list URL |
+| `get_slack_list_item` | One item plus its source message and thread |
+| `archive_slack_list_items` | Archive (or restore with `restore=True`) |
+| `delete_slack_list_items` | Permanently delete (irreversible) |
+
+Items carry `messages[]` entries with `channel_id`, `ts`, and `thread_ts`, so an
+agent can follow a to-do back to the conversation that created it and read the
+thread with `get_thread`. In read-only mode the two mutating tools are not
+registered.
 
 ## Running as a uv tool (local, no container)
 

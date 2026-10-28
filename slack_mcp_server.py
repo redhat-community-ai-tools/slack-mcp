@@ -1166,6 +1166,427 @@ async def get_unread_direct_messages(limit: int = 20) -> dict[str, Any]:
     }
 
 
+# --- Slack Lists -------------------------------------------------------------
+# Lists are files (mimetype application/vnd.slack-list). The public Lists API
+# (slackLists.*) only accepts bot/user OAuth tokens; with xoxc/xoxd we use the
+# web client's internal lists.records.* endpoints. Those are also the only ones
+# that expose archiving, which has no public API method.
+
+_slack_host: str | None = None
+_LIST_ID_RE = re.compile(r"\b(F[0-9A-Z]{8,})\b")
+
+
+async def _get_slack_host() -> str | None:
+    """Return the authenticated workspace base URL (e.g. https://acme.slack.com)."""
+    global _slack_host
+    if _slack_host:
+        return _slack_host
+    auth = await make_request(f"{SLACK_API_BASE}/auth.test")
+    if not auth or not auth.get("ok") or not auth.get("url"):
+        return None
+    _slack_host = auth["url"].rstrip("/")
+    return _slack_host
+
+
+def _list_id_from(value: str) -> str | None:
+    """Accept a bare F… list ID or any Slack URL containing one."""
+    if not value:
+        return None
+    match = _LIST_ID_RE.search(value)
+    return match.group(1) if match else None
+
+
+def _lists_session_required() -> dict[str, Any] | None:
+    """Slack Lists tools depend on internal endpoints unavailable to bot tokens."""
+    if SLACK_BOT_TOKEN:
+        return {
+            "ok": False,
+            "error": "Slack Lists tools require browser-session authentication "
+            "(SLACK_XOXC_TOKEN/SLACK_XOXD_TOKEN). The public Lists API is not "
+            "used here because it does not expose archiving.",
+        }
+    return None
+
+
+async def _lists_request(method: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Call an internal lists.* method on the authenticated workspace host."""
+    host = await _get_slack_host()
+    if not host:
+        return None
+    return await make_request(f"{host}/api/{method}", payload=payload)
+
+
+def _rich_text_to_plain(node: Any) -> str:
+    """Flatten Block Kit rich_text into plain text for agent consumption."""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_rich_text_to_plain(item) for item in node)
+    if not isinstance(node, dict):
+        return ""
+    node_type = node.get("type")
+    if node_type == "text":
+        return str(node.get("text", ""))
+    if node_type == "link":
+        return str(node.get("url", ""))
+    if node_type == "user":
+        return f"@{node.get('user_id', '')}"
+    if node_type == "channel":
+        return f"#{node.get('channel_id', '')}"
+    if node_type == "emoji":
+        return f":{node.get('name', '')}:"
+    return "".join(_rich_text_to_plain(item) for item in node.get("elements", []))
+
+
+def _plain_field_text(field: dict[str, Any]) -> str:
+    if field.get("text"):
+        return str(field["text"])
+    if field.get("rich_text"):
+        return _rich_text_to_plain(field["rich_text"])
+    value = field.get("value")
+    if isinstance(value, str) and value.startswith("[{"):
+        try:
+            return _rich_text_to_plain(json.loads(value))
+        except json.JSONDecodeError:
+            return value
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return "" if value is None else str(value)
+
+
+async def _format_list_record(
+    record: dict[str, Any], schema_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Turn a List record into {id, values, messages} with handles resolved."""
+    values: dict[str, Any] = {}
+    messages: list[dict[str, str]] = []
+    for field in record.get("fields", []):
+        column = schema_by_id.get(field.get("column_id", ""), {})
+        key = field.get("key") or column.get("key") or field.get("column_id", "")
+        column_type = column.get("type", "")
+        if field.get("message"):
+            values[key] = _plain_field_text(field)
+            for ref in field["message"]:
+                messages.append(
+                    {
+                        "channel_id": ref.get("channel_id", ""),
+                        "ts": ref.get("ts", ""),
+                        "thread_ts": ref.get("thread_ts", ""),
+                        "url": ref.get("value", ""),
+                    }
+                )
+        elif isinstance(field.get("user"), list):
+            values[key] = ", ".join(
+                [await get_user_handle(user_id) for user_id in field["user"]]
+            )
+        elif column_type == "date":
+            values[key] = field.get("date") or _plain_field_text(field)
+        elif column_type == "select":
+            values[key] = field.get("select") or _plain_field_text(field)
+        elif field.get("attachment"):
+            values[key] = field["attachment"]
+        else:
+            values[key] = _plain_field_text(field)
+
+    item: dict[str, Any] = {
+        "id": record.get("id", ""),
+        "created": record.get("date_created"),
+        "updated": record.get("updated_timestamp"),
+        "created_by": await get_user_handle(record.get("created_by", "")),
+        "values": values,
+    }
+    if messages:
+        item["messages"] = messages
+    return item
+
+
+def _schema_by_id(
+    list_file: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    schema = (list_file.get("list_metadata") or {}).get("schema") or []
+    return schema, {column.get("id", ""): column for column in schema}
+
+
+async def _fetch_list_records(
+    list_id: str, limit: int, archived: bool = False
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Page through lists.records.list. Returns (records, error)."""
+    records: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(records) < limit:
+        payload: dict[str, Any] = {
+            "list_id": list_id,
+            "count": max(1, min(limit - len(records), 200)),
+        }
+        if archived:
+            payload["archived"] = True
+        if cursor:
+            payload["cursor"] = cursor
+        data = await _lists_request("lists.records.list", payload)
+        if not data or not data.get("ok"):
+            return records, (data or {}).get("error", "list_records_unavailable")
+        page = data.get("records") or []
+        records.extend(page)
+        cursor = (data.get("response_metadata") or {}).get("next_cursor") or None
+        if not cursor or not page:
+            break
+    return records[:limit], None
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def list_slack_lists(limit: int = 50, query: str = "") -> dict[str, Any]:
+    """List Slack Lists visible to the authenticated user.
+
+    Returns each list's ID, title, owner, row counts and permalink. Use `query`
+    to match a substring of the title. IDs can be passed to get_slack_list.
+    Requires browser-session authentication (xoxc/xoxd).
+    """
+    session_error = _lists_session_required()
+    if session_error:
+        return session_error
+    if not 1 <= limit <= 500:
+        return {"ok": False, "error": "limit must be between 1 and 500."}
+
+    files: list[dict[str, Any]] = []
+    cursor: str | None = None
+    query_lower = query.strip().lower()
+    while len(files) < limit:
+        payload: dict[str, Any] = {
+            "types": "lists",
+            "count": max(1, min(limit - len(files), 200)),
+        }
+        if cursor:
+            payload["cursor"] = cursor
+        data = await make_request(f"{SLACK_API_BASE}/files.list", method="GET", payload=payload)
+        if not data or not data.get("ok"):
+            return {"ok": False, "error": (data or {}).get("error", "files_list_unavailable")}
+        page = data.get("files") or []
+        for list_file in page:
+            title = list_file.get("title") or ""
+            if query_lower and query_lower not in title.lower():
+                continue
+            files.append(list_file)
+            if len(files) >= limit:
+                break
+        cursor = (data.get("response_metadata") or {}).get("next_cursor") or None
+        if not cursor or not page:
+            break
+
+    lists = []
+    for list_file in files:
+        limits = list_file.get("list_limits") or {}
+        lists.append(
+            {
+                "id": list_file.get("id", ""),
+                "title": list_file.get("title", ""),
+                "owner": await get_user_handle(list_file.get("user", "")),
+                "row_count": limits.get("row_count"),
+                "archived_row_count": limits.get("archived_row_count"),
+                "permalink": list_file.get("permalink", ""),
+                "updated": list_file.get("updated"),
+            }
+        )
+    return {"ok": True, "count": len(lists), "lists": lists}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_slack_list(
+    list_id: str, include_archived: bool = False, limit: int = 100
+) -> dict[str, Any]:
+    """Read a Slack List: columns, item values and linked messages.
+
+    `list_id` accepts a bare ID (F…) or a Slack list URL. Each item has `values`
+    keyed by column key, plus `messages` when a cell references a Slack message
+    (channel_id/ts/thread_ts/url) for use with get_slack_list_item or get_thread.
+    Requires browser-session authentication (xoxc/xoxd).
+    """
+    session_error = _lists_session_required()
+    if session_error:
+        return session_error
+    resolved_id = _list_id_from(list_id)
+    if not resolved_id:
+        return {"ok": False, "error": "Could not find a Slack list ID (F…) in the input."}
+    if not 1 <= limit <= 1000:
+        return {"ok": False, "error": "limit must be between 1 and 1000."}
+
+    info = await make_request(
+        f"{SLACK_API_BASE}/files.info", method="GET", payload={"file": resolved_id}
+    )
+    if not info or not info.get("ok"):
+        return {"ok": False, "error": (info or {}).get("error", "list_not_found")}
+    list_file = info.get("file") or {}
+    if list_file.get("filetype") != "list":
+        return {"ok": False, "error": "not_a_list", "filetype": list_file.get("filetype")}
+
+    schema, schema_by_id = _schema_by_id(list_file)
+    records, error = await _fetch_list_records(resolved_id, limit)
+    if error:
+        return {"ok": False, "error": error}
+
+    items = [await _format_list_record(record, schema_by_id) for record in records]
+    truncation = {"truncated": True} if len(records) >= limit else {}
+    if include_archived:
+        archived_records, archived_error = await _fetch_list_records(
+            resolved_id, limit, archived=True
+        )
+        if archived_error:
+            return {"ok": False, "error": archived_error}
+        items.extend(
+            [await _format_list_record(record, schema_by_id) for record in archived_records]
+        )
+
+    limits = list_file.get("list_limits") or {}
+    return {
+        "ok": True,
+        "id": resolved_id,
+        "title": list_file.get("title", ""),
+        "permalink": list_file.get("permalink", ""),
+        "columns": [
+            {
+                "id": column.get("id", ""),
+                "key": column.get("key", ""),
+                "name": column.get("name", ""),
+                "type": column.get("type", ""),
+                "primary": bool(column.get("is_primary_column")),
+            }
+            for column in schema
+        ],
+        "row_count": limits.get("row_count"),
+        "archived_row_count": limits.get("archived_row_count"),
+        "items": items,
+        **truncation,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_slack_list_item(
+    list_id: str, item_id: str, include_thread: bool = True
+) -> dict[str, Any]:
+    """Read one Slack List item with the source message and its thread.
+
+    Item IDs are the `id` values returned by get_slack_list (Rec…). Any message
+    referenced by a cell is fetched with its text, author and replies.
+    """
+    session_error = _lists_session_required()
+    if session_error:
+        return session_error
+    resolved_id = _list_id_from(list_id)
+    if not resolved_id:
+        return {"ok": False, "error": "Could not find a Slack list ID (F…) in the input."}
+
+    data = await _lists_request(
+        "lists.records.info", {"list_id": resolved_id, "id": item_id}
+    )
+    if not data or not data.get("ok"):
+        return {"ok": False, "error": (data or {}).get("error", "record_not_found")}
+    list_file = data.get("list") or {}
+    schema, schema_by_id = _schema_by_id(list_file)
+    item = await _format_list_record(data.get("record") or {}, schema_by_id)
+    item["list_id"] = resolved_id
+    item["list_title"] = list_file.get("title", "")
+
+    for ref in item.get("messages", []):
+        channel_id = ref.get("channel_id", "")
+        ts = ref.get("ts", "")
+        if not channel_id or not ts:
+            continue
+        history = await make_request(
+            f"{SLACK_API_BASE}/conversations.history",
+            method="GET",
+            payload={
+                "channel": channel_id,
+                "latest": ts,
+                "oldest": ts,
+                "inclusive": "true",
+                "limit": 1,
+            },
+        )
+        messages = (history or {}).get("messages") or []
+        if not messages:
+            ref["error"] = "message_not_found_or_not_visible"
+            continue
+        message = messages[0]
+        ref["message"] = await filter_message_fields(message)
+        thread_ts = message.get("thread_ts") or ts
+        if include_thread and (message.get("reply_count") or message.get("thread_ts")):
+            replies = await get_thread_replies(channel_id, thread_ts)
+            ref["thread"] = [await filter_message_fields(reply) for reply in replies]
+
+    return {"ok": True, "columns": schema, "item": item}
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
+async def archive_slack_list_items(
+    list_id: str, item_ids: list[str], restore: bool = False
+) -> dict[str, Any]:
+    """Archive Slack List items, or restore them when restore=True.
+
+    Archived items disappear from the default view and are returned by
+    get_slack_list(include_archived=True). Item IDs come from get_slack_list.
+    """
+    _deny_if_read_only()
+    session_error = _lists_session_required()
+    if session_error:
+        return session_error
+    resolved_id = _list_id_from(list_id)
+    if not resolved_id:
+        return {"ok": False, "error": "Could not find a Slack list ID (F…) in the input."}
+    if not item_ids:
+        return {"ok": False, "error": "item_ids must contain at least one item ID."}
+
+    payload: dict[str, Any] = {
+        "list_id": resolved_id,
+        "ids": item_ids,
+        "reason": "unarchive-records" if restore else "archive-records",
+    }
+    if restore:
+        payload["restore"] = True
+    data = await _lists_request("lists.records.archive", payload)
+    ok = bool(data and data.get("ok"))
+    result: dict[str, Any] = {
+        "ok": ok,
+        "action": "restored" if restore else "archived",
+        "list_id": resolved_id,
+        "item_ids": item_ids,
+    }
+    if not ok:
+        result["error"] = (data or {}).get("error", "archive_failed")
+    return result
+
+
+@_register_tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True))
+async def delete_slack_list_items(list_id: str, item_ids: list[str]) -> dict[str, Any]:
+    """Permanently delete Slack List items. This cannot be undone.
+
+    Use archive_slack_list_items instead when the item may be needed later.
+    Item IDs come from get_slack_list.
+    """
+    _deny_if_read_only()
+    session_error = _lists_session_required()
+    if session_error:
+        return session_error
+    resolved_id = _list_id_from(list_id)
+    if not resolved_id:
+        return {"ok": False, "error": "Could not find a Slack list ID (F…) in the input."}
+    if not item_ids:
+        return {"ok": False, "error": "item_ids must contain at least one item ID."}
+
+    data = await _lists_request(
+        "lists.records.deleteMultiple",
+        {"list_id": resolved_id, "ids": item_ids, "reason": "delete-records"},
+    )
+    ok = bool(data and data.get("ok"))
+    result: dict[str, Any] = {
+        "ok": ok,
+        "action": "deleted",
+        "list_id": resolved_id,
+        "item_ids": item_ids,
+    }
+    if not ok:
+        result["error"] = (data or {}).get("error", "delete_failed")
+    return result
+
+
 async def get_random_deleted_user() -> str | None:
     """Get a random deleted user ID for clearing usergroups.
 
