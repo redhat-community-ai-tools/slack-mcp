@@ -421,8 +421,8 @@ def write_wrapper(logs_channel: str) -> None:
 
     # Build env args as a list so there are no stray line-continuation issues
     env_lines = [
-        '  -e SLACK_XOXC_TOKEN="${SLACK_MCP_XOXC_TOKEN}" \\',
-        '  -e SLACK_XOXD_TOKEN="${SLACK_MCP_XOXD_TOKEN}" \\',
+        "  -e SLACK_XOXC_TOKEN \\",
+        "  -e SLACK_XOXD_TOKEN \\",
         "  -e MCP_TRANSPORT=stdio \\",
     ]
     if logs_channel:
@@ -446,6 +446,10 @@ fi
 
 # shellcheck source=/dev/null
 source "$TOKENS"
+
+# Pass tokens via environment so they don't appear in process args
+export SLACK_XOXC_TOKEN="${{SLACK_MCP_XOXC_TOKEN}}"
+export SLACK_XOXD_TOKEN="${{SLACK_MCP_XOXD_TOKEN}}"
 
 exec {runtime} run -i --rm \\
 {env_block}
