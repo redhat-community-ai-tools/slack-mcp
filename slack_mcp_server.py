@@ -22,6 +22,7 @@ def log(msg: str) -> None:
 
 
 READ_ONLY_ENV_VAR = "SLACK_MCP_READ_ONLY"
+WARMUP_ENV_VAR = "SLACK_MCP_WARMUP"
 
 
 def _is_read_only() -> bool:
@@ -38,6 +39,17 @@ def _deny_if_read_only() -> None:
         )
 
 
+def _is_warmup_enabled() -> bool:
+    """True unless the operator opted out of the startup user-directory warmup.
+
+    Opt-out values (case-insensitive): 0, false, no, off. Anything else —
+    including unset — keeps the warmup enabled. This only gates the background
+    startup fetch; resolve_user_id still fetches the directory on demand.
+    """
+    v = os.environ.get(WARMUP_ENV_VAR, "").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
 # Parse CLI args before tool registration so --read-only can exclude write tools,
 # and so --help/--version print and exit before the token checks in main().
 _parser = argparse.ArgumentParser(
@@ -47,7 +59,8 @@ _parser = argparse.ArgumentParser(
     epilog="Key env vars: SLACK_BOT_TOKEN OR SLACK_XOXC_TOKEN+SLACK_XOXD_TOKEN; "
            "MCP_TRANSPORT (default stdio), LOGS_CHANNEL_ID, SLACK_TEAM_ID, "
            "SLACK_MCP_DATA (default ~/.local/share/slack-mcp), "
-           "SLACK_MCP_TOKENS_FILE (default <data>/tokens.env), SLACK_MCP_READ_ONLY. "
+           "SLACK_MCP_TOKENS_FILE (default <data>/tokens.env), SLACK_MCP_READ_ONLY, "
+           "SLACK_MCP_WARMUP=off (skip the startup user-directory fetch). "
            "See the README for the full list.",
 )
 _parser.add_argument(
@@ -139,6 +152,14 @@ _user_cache_gen: int = 0
 @asynccontextmanager
 async def _lifespan(app: "FastMCP"):
     """Warm the reverse-user cache in the background on server startup."""
+    if not _is_warmup_enabled():
+        log(
+            f"slack-mcp: startup user-directory warmup disabled via {WARMUP_ENV_VAR}; "
+            "resolve_user_id will fetch the directory on first use instead"
+        )
+        yield {}
+        return
+
     async def _warmup():
         """Fetch and cache the full user directory in the background at startup."""
         try:

@@ -224,6 +224,8 @@ A bot token works the same way — set `SLACK_BOT_TOKEN` in `env` instead of the
 
 The user cache and the default `tokens.env` live under `~/.local/share/slack-mcp/` (override with `SLACK_MCP_DATA`).
 
+On startup the server warms a reverse user cache in the background by walking the whole workspace directory via `users.list` (needed by `resolve_user_id` for name/handle lookups). On large workspaces this walk takes several minutes and can trip Slack's rate limits (`users.list` is Tier 2, ~20 req/min), especially when several sessions start at once. To skip the startup walk, set `SLACK_MCP_WARMUP=off` — `resolve_user_id` then fetches the directory on first use instead, and everything else (reading history, rendering handles, posting) is unaffected.
+
 Claude Code (bot token):
 
 ```bash
