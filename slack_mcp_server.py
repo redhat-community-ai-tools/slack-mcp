@@ -11,6 +11,8 @@ import re
 import asyncio
 from datetime import datetime, timezone
 import json
+import tempfile
+import time
 from pathlib import Path
 
 __version__ = "1.0.0"
@@ -94,6 +96,9 @@ except OSError:
 USER_CACHE_FILE = DATA_DIR / ".user_cache.json"
 REVERSE_USER_CACHE_FILE = DATA_DIR / ".reverse_user_cache.json"
 REVERSE_CACHE_TTL_HOURS = 24
+# Minimum spacing between users.list pages in the background warmup walk
+# (Tier 2, ~20 req/min; 3.5s leaves headroom).
+USERS_LIST_MIN_INTERVAL_S = 3.5
 _reverse_user_memory_cache: list[dict[str, str]] = []
 _reverse_user_memory_cache_time: datetime | None = None
 
@@ -163,7 +168,7 @@ async def _lifespan(app: "FastMCP"):
     async def _warmup():
         """Fetch and cache the full user directory in the background at startup."""
         try:
-            users = await _fetch_all_users()
+            users = await _fetch_all_users(paced=True)
             log(f"Cache warmup complete ({len(users)} users)")
         except Exception as e:
             log(f"Cache warmup failed: {e}")
@@ -337,12 +342,23 @@ def _load_user_cache() -> None:
         _user_cache = {}
 
 
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Write JSON via temp file + os.replace so readers never see a partial file."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            os.fchmod(f.fileno(), 0o660)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def _save_user_cache() -> None:
     """Save user cache to disk."""
     try:
-        with open(USER_CACHE_FILE, 'w') as f:
-            json.dump(_user_cache, f, indent=2)
-            os.fchmod(f.fileno(), 0o660)
+        _atomic_write_json(USER_CACHE_FILE, _user_cache)
     except Exception as e:
         log(f"Error saving user cache: {e}")
 
@@ -378,16 +394,18 @@ def _save_reverse_user_cache(users: list[dict[str, str]]) -> None:
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "users": sanitized,
         }
-        with open(REVERSE_USER_CACHE_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-            os.fchmod(f.fileno(), 0o660)
+        _atomic_write_json(REVERSE_USER_CACHE_FILE, data)
         log(f"Saved reverse user cache ({len(sanitized)} users)")
     except Exception as e:
         log(f"Error saving reverse user cache: {e}")
 
 
-async def _fetch_all_users() -> list[dict[str, str]]:
-    """Fetch all workspace users via users.list with pagination. Returns simplified user records."""
+async def _fetch_all_users(paced: bool = False) -> list[dict[str, str]]:
+    """Fetch all workspace users via users.list with pagination. Returns simplified user records.
+
+    paced=True spaces pages to the Tier 2 budget; used by the background warmup,
+    where nobody is waiting, so on-demand lookups keep their current speed.
+    """
     global _reverse_user_memory_cache, _reverse_user_memory_cache_time
 
     if _reverse_user_memory_cache and _reverse_user_memory_cache_time:
@@ -414,11 +432,18 @@ async def _fetch_all_users() -> list[dict[str, str]]:
         all_users: list[dict[str, str]] = []
         cursor = None
         complete = False
+        last_request_at = float("-inf")
 
         while True:
             payload: dict[str, Any] = {"limit": 200}
             if cursor:
                 payload["cursor"] = cursor
+
+            if paced:
+                wait = USERS_LIST_MIN_INTERVAL_S - (time.monotonic() - last_request_at)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                last_request_at = time.monotonic()
 
             data = await make_request(url, method="GET", payload=payload)
             if not data or not data.get("ok"):
