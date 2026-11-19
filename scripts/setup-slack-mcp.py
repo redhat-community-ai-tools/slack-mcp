@@ -424,6 +424,7 @@ def write_wrapper(logs_channel: str) -> None:
         '  -e SLACK_XOXC_TOKEN="${SLACK_MCP_XOXC_TOKEN}" \\',
         '  -e SLACK_XOXD_TOKEN="${SLACK_MCP_XOXD_TOKEN}" \\',
         "  -e MCP_TRANSPORT=stdio \\",
+        '  -e SLACK_MCP_READ_ONLY="${SLACK_MCP_READ_ONLY:-}" \\',
     ]
     if logs_channel:
         env_lines.append(f'  -e LOGS_CHANNEL_ID="{logs_channel}" \\')
