@@ -153,6 +153,9 @@ _channel_cache: dict[str, str] = {}
 _user_cache: dict[str, str] = {}
 _user_cache_lock = asyncio.Lock()
 _user_cache_gen: int = 0
+# Set by an on-demand (unpaced) walk request so an in-progress paced warmup
+# walk stops pacing instead of making the foreground caller wait for it.
+_foreground_waiting = asyncio.Event()
 
 @asynccontextmanager
 async def _lifespan(app: "FastMCP"):
@@ -404,7 +407,8 @@ async def _fetch_all_users(paced: bool = False) -> list[dict[str, str]]:
     """Fetch all workspace users via users.list with pagination. Returns simplified user records.
 
     paced=True spaces pages to the Tier 2 budget; used by the background warmup,
-    where nobody is waiting, so on-demand lookups keep their current speed.
+    where nobody is waiting. An on-demand call (paced=False) arriving mid-walk
+    switches the walk to full speed, so lookups keep their current latency.
     """
     global _reverse_user_memory_cache, _reverse_user_memory_cache_time
 
@@ -419,11 +423,15 @@ async def _fetch_all_users(paced: bool = False) -> list[dict[str, str]]:
         _reverse_user_memory_cache_time = fetched_at
         return cached
 
+    if not paced:
+        _foreground_waiting.set()
+
     async with _user_cache_lock:
         # Re-check after acquiring the lock — another task may have populated the cache.
         if _reverse_user_memory_cache and _reverse_user_memory_cache_time:
             age_hours = (datetime.now(timezone.utc) - _reverse_user_memory_cache_time).total_seconds() / 3600
             if age_hours < REVERSE_CACHE_TTL_HOURS:
+                _foreground_waiting.clear()
                 return _reverse_user_memory_cache
 
         gen_at_start = _user_cache_gen
@@ -439,10 +447,13 @@ async def _fetch_all_users(paced: bool = False) -> list[dict[str, str]]:
             if cursor:
                 payload["cursor"] = cursor
 
-            if paced:
+            if paced and not _foreground_waiting.is_set():
                 wait = USERS_LIST_MIN_INTERVAL_S - (time.monotonic() - last_request_at)
                 if wait > 0:
-                    await asyncio.sleep(wait)
+                    try:
+                        await asyncio.wait_for(_foreground_waiting.wait(), timeout=wait)
+                    except asyncio.TimeoutError:
+                        pass
                 last_request_at = time.monotonic()
 
             data = await make_request(url, method="GET", payload=payload)
@@ -467,6 +478,10 @@ async def _fetch_all_users(paced: bool = False) -> list[dict[str, str]]:
             if not cursor:
                 complete = True
                 break
+
+        # Any foreground waiter is served by this walk's result (or will run its
+        # own unpaced walk), so later warmups start paced again.
+        _foreground_waiting.clear()
 
         if _user_cache_gen != gen_at_start:
             log("Cache generation changed during fetch — discarding stale results")
