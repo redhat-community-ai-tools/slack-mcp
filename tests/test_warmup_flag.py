@@ -46,7 +46,7 @@ class TestLifespanWarmup:
         started = asyncio.Event()
         calls = []
 
-        async def fake_fetch():
+        async def fake_fetch(**kwargs):
             calls.append(1)
             started.set()
             return []
